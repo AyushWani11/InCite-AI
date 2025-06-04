@@ -1,3 +1,3 @@
-export { default as Button } from './Button';
-export { default as Modal } from './Modal';
-export { default as Input } from './Input';
+export { default as Button } from './Button.tsx';
+export { default as Modal } from './Modal.tsx';
+export { default as Input } from './Input.tsx';
