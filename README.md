@@ -27,6 +27,22 @@ This project is a full-stack AI-driven platform for uploading, storing, analyzin
 - Assess writing quality, methodology, and academic standards
 - Generates structured reviewer-style feedback
 - Provides a score out of 100 with detailed suggestions
+### User Accounts
+
+- Register, login, and logout
+- JWT token stored in HTTP-only cookies
+- Protected endpoints require authentication
+
+### Chat History & Streaming
+
+- Real-time responses via Socket.IO
+- Save chat sessions and load them later
+- Retrieve a single session by ID
+
+### Your Library
+
+- View papers uploaded by the current user
+
 
 ## Tech Stack
 
@@ -59,8 +75,9 @@ npm install
 Create a `.env` file:
 
 ```env
-MONGO_URI=mongodb://localhost:27017/ai-papers
+MONGODB_URI=mongodb://localhost:27017/ai-papers
 GEMINI_API_KEY=your_gemini_api_key_here
+JWT_SECRET=your_jwt_secret
 PORT=5000
 ```
 
@@ -80,6 +97,13 @@ npm start
 Visit: http://localhost:5000
 
 ## API Endpoints
+### Authentication
+
+- POST /api/auth/register – Create a user
+- POST /api/auth/login – Login and receive cookie
+- GET /api/auth/check-login – Verify session
+- POST /api/auth/logout – End session
+
 
 ### Upload and Storage
 
@@ -88,6 +112,7 @@ Visit: http://localhost:5000
 - DELETE /api/paper/delete/:id – Delete a specific paper
 - DELETE /api/paper/delete-all – Delete all uploaded papers
 
+- GET /api/paper/user-papers – List your uploaded papers
 ### Summarization
 
 - POST /api/paper/summarize/:paperId – Generate summary using Gemini
@@ -106,6 +131,7 @@ Visit: http://localhost:5000
 
 - POST /api/chat – Chat with papers (with or without file)
 - GET /api/chat/history – Retrieve previous sessions
+- GET /api/chat/history/:sessionId – Load a saved session
 - POST /api/chat/save-history – Save chat history
 
 ## Example Gemini Prompt for Summarization
