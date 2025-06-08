@@ -83,7 +83,7 @@ form{
 }
 
 .forgot-link a{
-    color: #005d60;
+    color: #00bba7;
     text-decoration: none;
     font-size: 16px;
 }   
@@ -91,7 +91,7 @@ form{
 .btn{
     width: 40%;
     height: 48px;
-    background: #005d60;
+    background: #00bba7;
     border: none;
     border-radius: 8px;
     color: #fff;
