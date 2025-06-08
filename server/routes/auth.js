@@ -32,7 +32,6 @@ router.post(
 		check('password', 'Password must be 6 or more characters').isLength({
 			min: 6,
 		}),
-		check('dob', 'Date of birth is required').not().isEmpty(),
 	],
 	async (req, res) => {
 		const errors = validationResult(req);
@@ -40,7 +39,7 @@ router.post(
 			return res.status(400).json({ errors: errors.array() });
 		}
 
-		const { username, email, password, dob } = req.body;
+		const { username, email, password, confirmPassword } = req.body;
 
 		try {
 			// Check if user already exists
@@ -54,14 +53,12 @@ router.post(
 				username,
 				email,
 				password,
-				dob,
 			});
 
-			// Hash the password
-			const salt = await bcrypt.genSalt(10);
-			user.password = await bcrypt.hash(password, salt);
+			// Set the virtual field confirmPassword
+			user.confirmPassword = confirmPassword;
 
-			// Save user to the database
+			// Save user to the database (pre-save hook will validate + hash password)
 			await user.save();
 
 			// Generate JWT token
@@ -70,10 +67,10 @@ router.post(
 
 			// Set token as an HTTP-only cookie
 			res.cookie('token', token, {
-				httpOnly: true, // Ensure cookie is not accessible via JavaScript
-				secure: process.env.NODE_ENV === 'production', // Use secure cookies in production
+				httpOnly: true,
+				secure: process.env.NODE_ENV === 'production',
 				sameSite: 'Lax',
-				maxAge: 3 * 60 * 60 * 1000, // Cookie expires in 3 hours
+				maxAge: 3 * 60 * 60 * 1000,
 			});
 
 			console.log('Token:', token);
@@ -137,8 +134,16 @@ router.post(
 );
 
 // Check if the user is logged in
-router.get('/check-login', authLogin, (req, res) => {
-	res.status(200).json({ msg: 'User is logged in', user: req.user });
+router.get('/check-login', authLogin, async (req, res) => {
+	try {
+		const user = await User.findById(req.user.id).select('username email');
+		if (!user) return res.status(401).json({ msg: 'User not found' });
+
+		res.status(200).json({ msg: 'User is logged in', user });
+	} catch (err) {
+		console.error('Check-login error:', err);
+		res.status(500).json({ msg: 'Server error' });
+	}
 });
 
 // Logout user

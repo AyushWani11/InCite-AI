@@ -4,6 +4,7 @@ const multer = require('multer');
 const pdfParse = require('pdf-parse');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const authLogin = require('../middleware/authToken');
+const mongoose = require('mongoose');
 const ChatHistory = require('../models/chatlog.js');
 const { searchRelevantChunks } = require('../utils/vectorStore');
 require('dotenv').config();
@@ -23,14 +24,87 @@ const generationConfig = {
 
 router.post('/', authLogin, upload.single('file'), async (req, res) => {
 	const userQuestion = req.body.question;
-	const chatHistory = req.body.history || [];
+	let chatHistory = req.body.history || '[]';
 	let fileContent = '';
+	let paperId = req.body.paperId;
+	console.log('paperId:', req.body);
+
+	if (paperId && typeof paperId === 'object') {
+		// Handle case where paperId is an object with null prototype
+		if (Array.isArray(paperId)) {
+			paperId = paperId[0]; // Take first value if array
+		} else {
+			// Convert object to string or extract value
+			paperId = Object.values(paperId)[0] || null;
+		}
+	}
+
+	// Ensure paperId is a string or null
+	paperId = paperId ? String(paperId).trim() : null;
+
+	console.log('Processed paperId:', paperId, typeof paperId);
+
+	// If paperId is provided but no file, fetch from GridFS
+
+	// Parse and validate chatHistory
+	try {
+		if (typeof chatHistory === 'string') {
+			chatHistory = JSON.parse(chatHistory);
+		}
+
+		if (!Array.isArray(chatHistory)) {
+			chatHistory = [];
+		}
+	} catch (parseError) {
+		console.error('Error parsing chat history:', parseError);
+		chatHistory = [];
+	}
+
+	// Validate and fix chat history for Gemini API requirements
+	const validateAndFixHistory = (history) => {
+		if (!history || history.length === 0) return [];
+
+		const fixedHistory = [];
+
+		for (let i = 0; i < history.length; i++) {
+			const message = history[i];
+
+			// Convert role names to match Gemini expectations
+			let role = message.role;
+			if (role === 'assistant') role = 'model';
+			if (role !== 'user' && role !== 'model') continue;
+
+			// Ensure first message is always from user
+			if (fixedHistory.length === 0 && role !== 'user') {
+				continue; // Skip non-user first messages
+			}
+
+			// Ensure alternating pattern
+			const lastRole =
+				fixedHistory.length > 0
+					? fixedHistory[fixedHistory.length - 1].role
+					: null;
+			if (lastRole === role) {
+				continue; // Skip consecutive messages from same role
+			}
+
+			fixedHistory.push({
+				role: role,
+				parts: [{ text: message.text || '' }],
+			});
+		}
+
+		return fixedHistory;
+	};
+
+	const validatedHistory = validateAndFixHistory(chatHistory);
 
 	if (!userQuestion || userQuestion.trim().length < 5) {
 		return res.status(400).json({ error: 'Question too short or missing' });
 	}
 
 	try {
+		// File processing remains the same...
 		if (req.file) {
 			if (req.file.mimetype === 'application/pdf') {
 				const buffer = await fs.readFile(req.file.path);
@@ -40,6 +114,32 @@ router.post('/', authLogin, upload.single('file'), async (req, res) => {
 				fileContent = await fs.readFile(req.file.path, 'utf-8');
 			}
 			await fs.unlink(req.file.path);
+		}
+
+		if (paperId && !req.file) {
+			try {
+				const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
+					bucketName: 'papers',
+				});
+
+				const chunks = [];
+				const stream = bucket.openDownloadStreamByName(paperId);
+
+				for await (const chunk of stream) {
+					chunks.push(chunk);
+				}
+
+				const buffer = Buffer.concat(chunks);
+				const parsed = await pdfParse(buffer);
+				fileContent = parsed.text;
+
+				console.log('Successfully loaded paper from GridFS');
+			} catch (gridError) {
+				console.warn(
+					'Could not fetch paper from GridFS, using vector search:',
+					gridError
+				);
+			}
 		}
 
 		let context = '';
@@ -60,11 +160,9 @@ router.post('/', authLogin, upload.single('file'), async (req, res) => {
 			context = fileContent;
 		}
 
+		// Use validated history instead of raw chatHistory
 		const promptHistory = [
-			...chatHistory.map((turn) => ({
-				role: turn.role,
-				parts: [{ text: turn.text }],
-			})),
+			...validatedHistory,
 			{
 				role: 'user',
 				parts: [

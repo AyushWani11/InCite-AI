@@ -11,17 +11,14 @@ const authLogin = async (req, res, next) => {
 		if (!token) {
 			return res.status(401).json({ msg: 'No token, authorization denied' });
 		}
-
 		// Verify token
 		const decoded = jwt.verify(token, JWT_SECRET);
 		req.user = decoded.user; // Attach user ID from token payload
-
 		// Fetch the user from the database to include username
 		const user = await User.findById(req.user.id).select('username email');
 		if (!user) {
 			return res.status(404).json({ msg: 'User not found' });
 		}
-
 		req.user.username = user.username; // Add username to req.user
 		req.user.email = user.email; // Add email if needed
 		next();

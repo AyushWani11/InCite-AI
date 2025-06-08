@@ -390,4 +390,23 @@ router.get('/assessment/:paperId', authLogin, async (req, res) => {
 	}
 });
 
+// Get papers uploaded by current user
+router.get('/user-papers', authLogin, async (req, res) => {
+	try {
+		const userId = req.user.id;
+
+		// Find all papers uploaded by the current user
+		const papers = await Paper.find({ uploadedBy: userId })
+			.sort({ createdAt: -1 }) // Sort by newest first
+			.select(
+				'title authors filename createdAt publicationDate keywords summary assessment'
+			); // Select only needed fields
+
+		res.status(200).json(papers);
+	} catch (err) {
+		console.error('Error fetching user papers:', err);
+		res.status(500).json({ error: 'Failed to fetch your papers' });
+	}
+});
+
 module.exports = router;

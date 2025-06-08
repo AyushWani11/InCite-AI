@@ -7,7 +7,7 @@ import './Login.css';
 const backendUrl =
 	process.env.NODE_ENV === 'production'
 		? 'https://vegaai.onrender.com/api'
-		: 'http://localhost:5001/api';
+		: 'http://localhost:5000/api';
 
 interface FormData {
 	email: string;

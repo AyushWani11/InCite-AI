@@ -7,14 +7,14 @@ import './Signup.css';
 const backendUrl: string =
 	process.env.NODE_ENV === 'production'
 		? 'https://vegaai.onrender.com/api'
-		: 'http://localhost:5001/api';
+		: 'http://localhost:5000/api';
 
 // Type definitions
 interface FormData {
 	username: string;
 	email: string;
 	password: string;
-	confirm: string;
+	confirmPassword: string;
 }
 
 interface ApiResponse {
@@ -27,13 +27,13 @@ const Signup: React.FC = () => {
 		username: '',
 		email: '',
 		password: '',
-		confirm: '',
+		confirmPassword: '',
 	});
 	const [error, setError] = useState<string>('');
 	const [success, setSuccess] = useState<string>('');
 	const navigate = useNavigate();
 
-	const { username, email, password, confirm } = formData;
+	const { username, email, password, confirmPassword } = formData;
 
 	const onChange = (e: React.ChangeEvent<HTMLInputElement>): void =>
 		setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -113,9 +113,9 @@ const Signup: React.FC = () => {
 					<div className='input-box'>
 						<input
 							type='password'
-							name='confirm'
+							name='confirmPassword'
 							placeholder='Confirm Password'
-							value={confirm}
+							value={confirmPassword}
 							onChange={onChange}
 							required
 						/>
