@@ -8,7 +8,7 @@ import { Link } from 'react-router-dom';
 const backendUrl =
 	process.env.NODE_ENV === 'production'
 		? 'https://vegaai.onrender.com/api'
-		: 'http://localhost:5000/api';
+		: 'http://localhost:4000/api';
 
 interface User {
 	id: string;
@@ -104,16 +104,9 @@ const DashNavbar: React.FC = () => {
 					<div className='w-8 h-8 bg-teal-500 rounded-lg flex items-center justify-center'>
 						<span className='text-white font-bold text-lg'>#</span>
 					</div>
-					<span className='text-xl font-semibold text-gray-800'>InCite AI</span>
+					<span className='text-3xl font-semibold text-gray-800'>InCite AI</span>
 				</Link>
-				<div className='relative'>
-					<Search className='absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4' />
-					<input
-						type='text'
-						placeholder='Search papers...'
-						className='pl-10 pr-4 py-2 w-80 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent'
-					/>
-				</div>
+				
 			</div>
 
 			<div className='flex items-center space-x-4'>

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { FileText, BookOpen, Star, Calendar, Download, X } from 'lucide-react';
+import { FileText, BookOpen, Star, Calendar, Download, X,Menu } from 'lucide-react';
 
 import SidebarPapers from '../Components/layout/SidebarPapers';
 import ChatInterface from '../Components/layout/ChatInterface';
@@ -9,7 +9,7 @@ import PaperViewer from '../Components/layout/PaperViewer';
 const backendUrl =
 	process.env.NODE_ENV === 'production'
 		? 'https://vegaai.onrender.com/api'
-		: 'http://localhost:5000/api';
+		: 'http://localhost:4000/api';
 
 // Types matching your backend structure
 interface Paper {
@@ -85,65 +85,93 @@ const ResizableHandle: React.FC<{ onResize: (deltaX: number) => void }> = ({
 
 // Main Dashboard Component
 const Dashboard: React.FC = () => {
-	const [selectedPaper, setSelectedPaper] = useState<Paper | null>(null);
-	const [paperViewWidth, setPaperViewWidth] = useState(60);
+  const [selectedPaper, setSelectedPaper] = useState<Paper | null>(null);
+  const [paperViewWidth, setPaperViewWidth] = useState(60);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
-	const handlePaperSelect = useCallback((paper: Paper | null) => {
-		setSelectedPaper(paper);
-	}, []);
+  const handlePaperSelect = useCallback((paper: Paper | null) => {
+    setSelectedPaper(paper);
+  }, []);
 
-	const handleClosePaper = useCallback(() => {
-		setSelectedPaper(null);
-	}, []);
+  const handleClosePaper = useCallback(() => {
+    setSelectedPaper(null);
+  }, []);
 
-	const handleResize = useCallback((deltaX: number) => {
-		const containerWidth = window.innerWidth - 320;
-		const deltaPercentage = (deltaX / containerWidth) * 100;
-		setPaperViewWidth((prev) =>
-			Math.max(30, Math.min(80, prev + deltaPercentage))
-		);
-	}, []);
+  const handleResize = useCallback(
+    (deltaX: number) => {
+      const containerWidth = window.innerWidth - (isSidebarOpen ? 320 : 0);
+      const deltaPercent = (deltaX / containerWidth) * 100;
+      setPaperViewWidth((p) => Math.max(30, Math.min(80, p + deltaPercent)));
+    },
+    [isSidebarOpen]
+  );
 
-	return (
-		<div className='h-screen flex flex-col bg-gray-50'>
-			<DashNavbar />
+  const toggleSidebar = useCallback(() => {
+    setIsSidebarOpen((o) => !o);
+  }, []);
 
-			<div className='flex-1 flex height-full overflow-hidden'>
-				<div className='w-80 border-gray-200 overflow-y-auto bg-white border-r'>
-					<SidebarPapers
-						onPaperSelect={handlePaperSelect}
-						selectedPaper={selectedPaper}
-					/>
-				</div>
+  return (
+    <div className="h-screen flex flex-col bg-gray-50">
+      <DashNavbar />
 
-				<div className='flex-1 flex transition-all duration-300'>
-					{selectedPaper ? (
-						<>
-							<div
-								className='overflow-hidden transition-all duration-300'
-								style={{ width: `${paperViewWidth}%` }}
-							>
-								<PaperViewer paper={selectedPaper} onClose={handleClosePaper} />
-							</div>
+      <div className="flex-1 flex overflow-hidden">
+        {/* SHOW “☰” WHEN SIDEBAR IS HIDDEN */}
+        {!isSidebarOpen && (
+          <button
+            className="p-2 bg-white border-r cursor-pointer"
+            onClick={toggleSidebar}
+            aria-label="Open sidebar"
+          >
+            <Menu size={24} />
+          </button>
+        )}
 
-							<ResizableHandle onResize={handleResize} />
+        {/* SIDEBAR */}
+        {isSidebarOpen && (
+          <div className="w-80 border-r border-gray-200 bg-white overflow-y-auto">
+            <button
+              className="p-2 float-right"
+              onClick={toggleSidebar}
+              aria-label="Close sidebar"
+            >
+              <X size={20} />
+            </button>
+            <SidebarPapers
+              selectedPaper={selectedPaper}
+              onPaperSelect={handlePaperSelect}
+            />
+          </div>
+        )}
 
-							<div
-								className='overflow-hidden transition-all duration-300'
-								style={{ width: `${100 - paperViewWidth}%` }}
-							>
-								<ChatInterface selectedPaper={selectedPaper} />
-							</div>
-						</>
-					) : (
-						<div className='w-full transition-all duration-300'>
-							<ChatInterface selectedPaper={null} />
-						</div>
-					)}
-				</div>
-			</div>
-		</div>
-	);
+        {/* MAIN CONTENT */}
+        <div className="flex-1 flex transition-all duration-300">
+          {selectedPaper ? (
+            <>
+              <div
+                className="overflow-hidden transition-all duration-300"
+                style={{ width: `${paperViewWidth}%` }}
+              >
+                <PaperViewer paper={selectedPaper} onClose={handleClosePaper} />
+              </div>
+
+              <ResizableHandle onResize={handleResize} />
+
+              <div
+                className="overflow-hidden transition-all duration-300"
+                style={{ width: `${100 - paperViewWidth}%` }}
+              >
+                <ChatInterface selectedPaper={selectedPaper} />
+              </div>
+            </>
+          ) : (
+            <div className="w-full transition-all duration-300">
+              <ChatInterface selectedPaper={null} />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 };
 
 export default Dashboard;

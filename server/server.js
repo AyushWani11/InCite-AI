@@ -98,7 +98,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/paper', paperRoutes);
 
 // Start the server
-const PORT = 5000;
+const PORT = 4000;
 server.listen(PORT, () => {
 	console.log(`Server running on port ${PORT}`);
 });

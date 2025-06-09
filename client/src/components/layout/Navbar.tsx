@@ -6,7 +6,7 @@ import { Button } from '../common';
 const backendUrl =
 	process.env.NODE_ENV === 'production'
 		? 'https://vegaai.onrender.com/api'
-		: 'http://localhost:5000/api';
+		: 'http://localhost:4000/api';
 
 const Navbar: React.FC = () => {
 	const [isMenuOpen, setIsMenuOpen] = useState(false);
