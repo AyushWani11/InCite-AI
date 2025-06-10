@@ -6,7 +6,7 @@ import { Button } from '../common';
 const HeroSection: React.FC = () => {
   return (
     <section className="pt-20 pb-16 bg-gradient-to-br from-gray-50 to-white">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
           {/* Left Content */}
           <div className="space-y-8">
@@ -40,7 +40,7 @@ const HeroSection: React.FC = () => {
               </Button>
             </div>
 
-            {/* Trust Indicators */}
+            {/* Trust Indicators
             <div className="flex items-center space-x-8 pt-8">
               <div className="flex items-center space-x-2">
                 <div className="flex -space-x-1">
@@ -61,7 +61,7 @@ const HeroSection: React.FC = () => {
                 </div>
                 <span className="text-sm text-gray-600 ml-2">4.9/5</span>
               </div>
-            </div>
+            </div> */}
           </div>
 
           {/* Right Content - Dashboard Preview */}
@@ -76,7 +76,7 @@ const HeroSection: React.FC = () => {
                     <div className="w-3 h-3 rounded-full bg-green-400"></div>
                   </div>
                   <div className="text-sm font-medium text-gray-600">
-                    PaperMind AI Dashboard
+                    InCite AI Dashboard
                   </div>
                 </div>
               </div>
@@ -145,8 +145,8 @@ const HeroSection: React.FC = () => {
             </div>
 
             {/* Floating elements for visual interest */}
-            <div className="absolute -top-4 -right-4 w-20 h-20 bg-teal-100 rounded-full opacity-60"></div>
-            <div className="absolute -bottom-4 -left-4 w-16 h-16 bg-blue-100 rounded-full opacity-60"></div>
+            <div className="absolute -top-4 -right-4 w-8 h-8 bg-teal-200 rounded-full opacity-60"></div>
+            <div className="absolute -bottom-4 -left-4 w-12 h-12 bg-blue-200 rounded-full opacity-40"></div>
           </div>
         </div>
       </div>

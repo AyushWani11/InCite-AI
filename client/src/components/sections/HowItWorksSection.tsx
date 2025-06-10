@@ -231,7 +231,7 @@ const HowItWorksSection: React.FC = () => {
             Ready to transform your research workflow?
           </h3>
           <p className="text-lg opacity-90 mb-8 max-w-2xl mx-auto">
-            Join thousands of researchers who are already using AI to accelerate their work
+            Take your research to the next level with the help of AI
           </p>
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
