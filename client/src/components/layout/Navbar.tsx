@@ -5,7 +5,7 @@ import { Button } from '../common';
 
 const backendUrl =
 	process.env.NODE_ENV === 'production'
-		? 'https://vegaai.onrender.com/api'
+		? process.env.BACKEND_URL
 		: 'http://localhost:5000/api';
 
 const Navbar: React.FC = () => {
@@ -54,8 +54,8 @@ const Navbar: React.FC = () => {
 					<div className='hidden md:flex space-x-8 ml-10'>
 						<a href='#features'>Features</a>
 						<a href='#how-it-works'>How it Works</a>
-						<a href='#pricing'>Pricing</a>
-						<a href='#contact'>Contact</a>
+						{/* <a href='#pricing'>Pricing</a>
+						<a href='#contact'>Contact</a> */}
 					</div>
 
 					{/* Desktop CTA */}

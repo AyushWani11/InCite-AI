@@ -6,7 +6,7 @@ import './Signup.css';
 // Backend URL
 const backendUrl: string =
 	process.env.NODE_ENV === 'production'
-		? 'https://vegaai.onrender.com/api'
+		? process.env.BACKEND_URL || 'http://localhost:5000/api'
 		: 'http://localhost:5000/api';
 
 // Type definitions

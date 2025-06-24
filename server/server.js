@@ -18,7 +18,7 @@ app.use(cookieParser());
 const corsOptions = {
 	origin:
 		process.env.NODE_ENV === 'production'
-			? 'https://vega-ai-theta.vercel.app' // Production frontend URL
+			? process.env.FRONTEND_URL // Production frontend URL
 			: 'http://localhost:5173', // Development frontend URL
 	credentials: true, // Allow cookies to be sent with requests
 };
@@ -45,7 +45,7 @@ const io = new Server(server, {
 	cors: {
 		origin:
 			process.env.NODE_ENV === 'production'
-				? 'https://vega-ai-theta.vercel.app' // Production frontend URL
+				? process.env.FRONTEND_URL // Production frontend URL
 				: 'http://localhost:5173', // Development frontend URL
 	},
 });

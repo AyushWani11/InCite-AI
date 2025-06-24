@@ -5,8 +5,8 @@ import './Logout.css';
 // Backend URL
 const backendUrl =
 	process.env.NODE_ENV === 'production'
-		? 'https://vegaai.onrender.com/api'
-		: 'http://localhost:5001/api';
+		? process.env.BACKEND_URL
+		: 'http://localhost:5000/api';
 
 const Logout = () => {
 	const navigate = useNavigate();
@@ -34,25 +34,21 @@ const Logout = () => {
 	}, [navigate]);
 
 	return (
-		<div className="container">
-			<div className="form-box login">
-				<form action="">
+		<div className='container'>
+			<div className='form-box login'>
+				<form action=''>
 					<h1>Thank You for Using Incite AI</h1>
 					<h3>See You Later!</h3>
-
-
-
 				</form>
 			</div>
 			<div className='toggle-box'>
 				<div className='toggle-panel toggle-left'>
 					<h1>You are Logged Out</h1>
-					<a href='/login' className='btn register-btn'>Sign back in</a>
+					<a href='/login' className='btn register-btn'>
+						Sign back in
+					</a>
 				</div>
-
 			</div>
-
-
 		</div>
 	);
 };
