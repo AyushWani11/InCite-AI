@@ -7,8 +7,8 @@ import { Link } from 'react-router-dom';
 
 const backendUrl =
 	process.env.NODE_ENV === 'production'
-		? process.env.BACKEND_URL || 'https://incite-ai-4vrv.onrender.com/api'
-		: 'https://incite-ai-4vrv.onrender.com/api';
+		? 'https://incite-ai-4vrv.onrender.com/api'
+		: 'http://localhost:5000/api';
 
 interface User {
 	id: string;
