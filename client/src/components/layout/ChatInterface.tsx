@@ -39,7 +39,7 @@ interface ChatInterfaceProps {
 
 const backendUrl =
 	process.env.NODE_ENV === 'production'
-		? process.env.BACKEND_URL
+		? process.env.BACKEND_URL || 'https://incite-ai-4vrv.onrender.com/api'
 		: 'https://incite-ai-4vrv.onrender.com/api';
 
 // Custom hook for streaming chat with enhanced features
