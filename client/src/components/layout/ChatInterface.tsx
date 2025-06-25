@@ -124,18 +124,18 @@ const useEnhancedStreamingChat = () => {
 	return { sendMessage, isLoading };
 };
 
-const checkAuthStatus = async () => {
-	try {
-		const response = await fetch(`${backendUrl}/auth/verify`, {
-			method: 'GET',
-			credentials: 'include',
-		});
-		return response.ok;
-	} catch (error) {
-		console.error('Auth check failed:', error);
-		return false;
-	}
-};
+// const checkAuthStatus = async () => {
+// 	try {
+// 		const response = await fetch(`${backendUrl}/auth/verify`, {
+// 			method: 'GET',
+// 			credentials: 'include',
+// 		});
+// 		return response.ok;
+// 	} catch (error) {
+// 		console.error('Auth check failed:', error);
+// 		return false;
+// 	}
+// };
 
 // Helper function to extract code blocks
 const extractCodeBlocks = (text: string) => {
@@ -246,12 +246,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedPaper }) => {
 	};
 
 	// Convert messages to backend format for history
-	const getHistoryForBackend = () => {
-		return chatHistoryRef.current.map((msg) => ({
-			role: msg.role === 'user' ? 'user' : 'model',
-			text: msg.parts.map((part) => part.text).join(' '),
-		}));
-	};
+	// const getHistoryForBackend = () => {
+	// 	return chatHistoryRef.current.map((msg) => ({
+	// 		role: msg.role === 'user' ? 'user' : 'model',
+	// 		text: msg.parts.map((part) => part.text).join(' '),
+	// 	}));
+	// };
 
 	const handleSendMessage = async () => {
 		if (!inputMessage.trim() || isLoading) return;

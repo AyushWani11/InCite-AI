@@ -1,23 +1,15 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
-import {
-	FileText,
-	BookOpen,
-	Star,
-	Calendar,
-	Download,
-	X,
-	Menu,
-} from 'lucide-react';
+import React, { useState, useRef, useCallback } from 'react';
+import { X, Menu } from 'lucide-react';
 
 import SidebarPapers from '../Components/layout/SidebarPapers';
 import ChatInterface from '../Components/layout/ChatInterface';
 import DashNavbar from '../Components/layout/DashNavbar';
 import PaperViewer from '../Components/layout/PaperViewer';
 
-const backendUrl =
-	process.env.NODE_ENV === 'production'
-		? process.env.BACKEND_URL
-		: 'http://localhost:5000/api';
+// const backendUrl =
+// 	process.env.NODE_ENV === 'production'
+// 		? process.env.BACKEND_URL
+// 		: 'http://localhost:5000/api';
 
 // Types matching your backend structure
 interface Paper {
@@ -28,19 +20,19 @@ interface Paper {
 	createdAt: string;
 }
 
-interface Message {
-	id: string;
-	type: 'user' | 'assistant';
-	content: string;
-	timestamp: Date;
-}
+// interface Message {
+// 	id: string;
+// 	type: 'user' | 'assistant';
+// 	content: string;
+// 	timestamp: Date;
+// }
 
 // Add user interface
-interface User {
-	id: string;
-	username: string;
-	email: string;
-}
+// interface User {
+// 	id: string;
+// 	username: string;
+// 	email: string;
+// }
 
 // Navbar Component
 

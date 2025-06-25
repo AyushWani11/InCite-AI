@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
 	FileText,
 	Download,
@@ -311,7 +311,7 @@ const SummaryDisplay: React.FC<{ summary: SummaryType }> = ({ summary }) => {
 				</button>
 			</div>
 
-			{Object.entries(summary).map(([key, value], index) => (
+			{Object.entries(summary).map(([key, value]) => (
 				<div
 					key={key}
 					className='bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl p-6 border border-gray-200'

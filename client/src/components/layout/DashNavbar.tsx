@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import type { ChangeEvent } from 'react';
-import { Upload, Search } from 'lucide-react';
+import { Upload } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 const backendUrl =

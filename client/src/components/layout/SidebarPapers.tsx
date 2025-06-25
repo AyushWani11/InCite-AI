@@ -30,10 +30,10 @@ const SidebarPapers: React.FC<SidebarPapersProps> = ({
 	const [error, setError] = useState('');
 
 	const [searchTerm, setSearchTerm] = useState('');
-	const [startDate, setStartDate] = useState('');
-	const [endDate, setEndDate] = useState('');
-	const [isOpen, setIsOpen] = useState(true);
-	const toggleSidebar = () => setIsOpen((prev) => !prev);
+	// const [startDate, setStartDate] = useState('');
+	// const [endDate, setEndDate] = useState('');
+	// const [isOpen, setIsOpen] = useState(true);
+	// const toggleSidebar = () => setIsOpen((prev) => !prev);
 	useEffect(() => {
 		const fetchUserPapers = async () => {
 			setLoading(true);
@@ -76,16 +76,16 @@ const SidebarPapers: React.FC<SidebarPapersProps> = ({
 				(paper.filename &&
 					paper.filename.toLowerCase().includes(searchTerm.toLowerCase()));
 
-			const paperDate = new Date(paper.createdAt);
-			const start = startDate ? new Date(startDate) : null;
-			const end = endDate ? new Date(endDate + 'T23:59:59') : null;
+			// const paperDate = new Date(paper.createdAt);
+			// const start = startDate ? new Date(startDate) : null;
+			// const end = endDate ? new Date(endDate + 'T23:59:59') : null;
 
-			const matchesDateRange =
-				(!start || paperDate >= start) && (!end || paperDate <= end);
+			// const matchesDateRange =
+			// 	(!start || paperDate >= start) && (!end || paperDate <= end);
 
-			return matchesSearch && matchesDateRange;
+			return matchesSearch;
 		});
-	}, [papers, searchTerm, startDate, endDate]);
+	}, [papers, searchTerm]);
 
 	const highlightText = (text: string, term: string) => {
 		if (!term || !text) return text;
@@ -111,11 +111,11 @@ const SidebarPapers: React.FC<SidebarPapersProps> = ({
 		});
 	};
 
-	const clearFilters = () => {
-		setSearchTerm('');
-		setStartDate('');
-		setEndDate('');
-	};
+	// const clearFilters = () => {
+	// 	setSearchTerm('');
+	// 	setStartDate('');
+	// 	setEndDate('');
+	// };
 
 	return (
 		<>

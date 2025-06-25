@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Play, Star } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { Button } from '../common';
 
 const HeroSection: React.FC = () => {
