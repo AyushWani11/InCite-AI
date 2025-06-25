@@ -1,10 +1,10 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { X, Menu } from 'lucide-react';
 
-import SidebarPapers from '../Components/layout/SidebarPapers';
-import ChatInterface from '../Components/layout/ChatInterface';
-import DashNavbar from '../Components/layout/DashNavbar';
-import PaperViewer from '../Components/layout/PaperViewer';
+import SidebarPapers from '../Components/layout/SidebarPapers.tsx';
+import ChatInterface from '../Components/layout/ChatInterface.tsx';
+import DashNavbar from '../Components/layout/DashNavbar.tsx';
+import PaperViewer from '../Components/layout/PaperViewer.tsx';
 
 // const backendUrl =
 // 	process.env.NODE_ENV === 'production'
