@@ -6,7 +6,7 @@ import { Button } from '../common';
 const backendUrl =
 	process.env.NODE_ENV === 'production'
 		? process.env.BACKEND_URL
-		: 'http://localhost:5000/api';
+		: 'https://incite-ai-4vrv.onrender.com/api';
 
 const Navbar: React.FC = () => {
 	const [isMenuOpen, setIsMenuOpen] = useState(false);

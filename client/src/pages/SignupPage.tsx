@@ -6,8 +6,8 @@ import './Signup.css';
 // Backend URL
 const backendUrl: string =
 	process.env.NODE_ENV === 'production'
-		? process.env.BACKEND_URL || 'http://localhost:5000/api'
-		: 'http://localhost:5000/api';
+		? process.env.BACKEND_URL || 'https://incite-ai-4vrv.onrender.com/api'
+		: 'https://incite-ai-4vrv.onrender.com/api';
 
 // Type definitions
 interface FormData {

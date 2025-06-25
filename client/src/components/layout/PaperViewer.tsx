@@ -12,7 +12,7 @@ import {
 const backendUrl =
 	process.env.NODE_ENV === 'production'
 		? process.env.BACKEND_URL
-		: 'http://localhost:5000/api';
+		: 'https://incite-ai-4vrv.onrender.com/api';
 
 interface Paper {
 	_id: string;

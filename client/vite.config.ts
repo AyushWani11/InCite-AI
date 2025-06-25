@@ -8,7 +8,8 @@ export default defineConfig({
 	server: {
 		proxy: {
 			'/api': {
-				target: process.env.BACKEND_URL || 'http://localhost:5000',
+				target:
+					process.env.BACKEND_URL || 'https://incite-ai-4vrv.onrender.com',
 				changeOrigin: true,
 				secure: false,
 			},
