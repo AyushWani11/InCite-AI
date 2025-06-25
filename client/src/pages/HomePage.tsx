@@ -1,12 +1,12 @@
 import React from 'react';
-import { Navbar } from '../Components/layout';
+import { Navbar } from '../components/layout';
 import {
 	HeroSection,
 	FeaturesSection,
 	SearchSection,
 	HowItWorksSection,
-} from '../Components/sections';
-import { Footer } from '../Components/layout';
+} from '../components/sections';
+import { Footer } from '../components/layout';
 
 const HomePage: React.FC = () => {
 	return (

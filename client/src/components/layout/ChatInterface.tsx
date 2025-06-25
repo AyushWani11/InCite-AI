@@ -17,7 +17,7 @@ import { marked } from 'marked';
 import SpeechRecognition, {
 	useSpeechRecognition,
 } from 'react-speech-recognition';
-import CodeBlock from '../common/CodeBlock.tsx';
+import CodeBlock from '../common/CodeBlock';
 
 interface Paper {
 	_id: string;
