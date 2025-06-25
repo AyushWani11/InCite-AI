@@ -620,7 +620,7 @@ const PaperViewer: React.FC<PaperViewerProps> = ({ paper, onClose }) => {
 							</a>
 							<button
 								onClick={handleDelete}
-								className='p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-all duration-200'
+								className='cursor-pointer p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-all duration-200'
 								title='Delete Paper'
 							>
 								<Trash2 className='w-4 h-4' />
@@ -628,7 +628,7 @@ const PaperViewer: React.FC<PaperViewerProps> = ({ paper, onClose }) => {
 
 							<button
 								onClick={onClose}
-								className='p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-all duration-200'
+								className='cursor-pointer p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-all duration-200'
 								title='Close paper'
 							>
 								<X className='w-4 h-4' />
@@ -641,7 +641,7 @@ const PaperViewer: React.FC<PaperViewerProps> = ({ paper, onClose }) => {
 						{existingSummary ? (
 							<button
 								onClick={viewSummary}
-								className='flex items-center space-x-2 px-4 py-2.5 rounded-lg bg-teal-100 text-gray-700 hover:bg-gray-200 transition-all duration-200 font-medium text-sm shadow-sm'
+								className='cursor-pointer flex items-center space-x-2 px-4 py-2.5 rounded-lg bg-teal-100 text-gray-700 hover:bg-gray-200 transition-all duration-200 font-medium text-sm shadow-sm'
 							>
 								<FileText className='w-4 h-4' />
 								<span>View Summary</span>
@@ -672,7 +672,7 @@ const PaperViewer: React.FC<PaperViewerProps> = ({ paper, onClose }) => {
 						{existingAssessment ? (
 							<button
 								onClick={viewAssessment}
-								className='flex items-center space-x-2 px-4 py-2.5 rounded-lg bg-gray-100 text-gray-700 hover:bg-teal-100 transition-all duration-200 font-medium text-sm shadow-sm'
+								className='cursor-pointer flex items-center space-x-2 px-4 py-2.5 rounded-lg bg-gray-100 text-gray-700 hover:bg-teal-100 transition-all duration-200 font-medium text-sm shadow-sm'
 							>
 								<Star className='w-4 h-4' />
 								<span>View Assessment</span>

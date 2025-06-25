@@ -32,7 +32,8 @@ const SidebarPapers: React.FC<SidebarPapersProps> = ({
 	const [searchTerm, setSearchTerm] = useState('');
 	const [startDate, setStartDate] = useState('');
 	const [endDate, setEndDate] = useState('');
-
+	const [isOpen, setIsOpen] = useState(true);
+	const toggleSidebar = () => setIsOpen((prev) => !prev);
 	useEffect(() => {
 		const fetchUserPapers = async () => {
 			setLoading(true);
@@ -117,97 +118,74 @@ const SidebarPapers: React.FC<SidebarPapersProps> = ({
 	};
 
 	return (
-		<aside className='sidebar-papers'>
-			<h3 className='sidebar-title'>Your Uploaded Papers</h3>
+		<>
+			<aside className='sidebar-papers'>
+				<h3 className='sidebar-title'>Your Uploaded Papers</h3>
 
-			<div className='filters-section'>
-				<div className='search-container'>
-					<Search className='search-icon' size={16} />
-					<input
-						type='text'
-						className='search-input'
-						placeholder='Search by title, author, or filename...'
-						value={searchTerm}
-						onChange={(e) => setSearchTerm(e.target.value)}
-					/>
-				</div>
-
-				<div className='date-filter-container'>
-					<label className='date-filter-label'>Filter by Upload Date:</label>
-					<div className='date-inputs'>
+				<div className='filters-section'>
+					<div className='search-container'>
+						<Search className='search-icon' size={16} />
 						<input
-							type='date'
-							className='date-input'
-							value={startDate}
-							onChange={(e) => setStartDate(e.target.value)}
-							title='From Date'
-						/>
-						<span className='date-separator'>to</span>
-						<input
-							type='date'
-							className='date-input'
-							value={endDate}
-							onChange={(e) => setEndDate(e.target.value)}
-							title='To Date'
+							type='text'
+							className='search-input'
+							placeholder='Search by title, author, or filename...'
+							value={searchTerm}
+							onChange={(e) => setSearchTerm(e.target.value)}
 						/>
 					</div>
 
-					{(searchTerm || startDate || endDate) && (
-						<button className='clear-filters-btn' onClick={clearFilters}>
-							Clear Filters
-						</button>
-					)}
+					<div className='papers-count'>
+						Showing {filteredPapers.length} of {papers.length} papers
+					</div>
 				</div>
 
-				<div className='papers-count'>
-					Showing {filteredPapers.length} of {papers.length} papers
-				</div>
-			</div>
+				{error && <div className='error-message'>{error}</div>}
+				{loading && (
+					<div className='loading-message'>Loading your papers...</div>
+				)}
 
-			{error && <div className='error-message'>{error}</div>}
-			{loading && <div className='loading-message'>Loading your papers...</div>}
-
-			{papers.length === 0 && !loading ? (
-				<div className='no-papers'>
-					No papers uploaded yet.
-					<br />
-					<small>Upload your first research paper to get started!</small>
-				</div>
-			) : filteredPapers.length === 0 && !loading ? (
-				<div className='no-results'>
-					No papers match your current filters.
-					<br />
-					<small>Try adjusting your search or date range.</small>
-				</div>
-			) : (
-				<div className='papers-container'>
-					{filteredPapers.map((paper) => (
-						<div
-							key={paper._id}
-							className={`paper-card ${
-								selectedPaper?._id === paper._id ? 'selected-card' : ''
-							}`}
-							onClick={() => onPaperSelect(paper)}
-						>
-							<div className='paper-info'>
-								<h4 className='paper-title'>
-									{highlightText(paper.title, searchTerm)}
-								</h4>
-								<p className='paper-authors'>
-									{paper.authors?.length
-										? highlightText(paper.authors.join(', '), searchTerm)
-										: 'Unknown Author'}
-								</p>
-								<p className='paper-date'>
-									<Calendar size={14} className='inline mr-1' />
-									Uploaded: {formatDate(paper.createdAt)}
-								</p>
+				{papers.length === 0 && !loading ? (
+					<div className='no-papers'>
+						No papers uploaded yet.
+						<br />
+						<small>Upload your first research paper to get started!</small>
+					</div>
+				) : filteredPapers.length === 0 && !loading ? (
+					<div className='no-results'>
+						No papers match your current filters.
+						<br />
+						<small>Try adjusting your search range.</small>
+					</div>
+				) : (
+					<div className='papers-container'>
+						{filteredPapers.map((paper) => (
+							<div
+								key={paper._id}
+								className={`paper-card cursor-pointer ${
+									selectedPaper?._id === paper._id ? 'selected-card' : ''
+								}`}
+								onClick={() => onPaperSelect(paper)}
+							>
+								<div className='paper-info'>
+									<h4 className='paper-title'>
+										{highlightText(paper.title, searchTerm)}
+									</h4>
+									<p className='paper-authors'>
+										{paper.authors?.length
+											? highlightText(paper.authors.join(', '), searchTerm)
+											: 'Unknown Author'}
+									</p>
+									<p className='paper-date'>
+										<Calendar size={14} className='inline mr-1' />
+										Uploaded: {formatDate(paper.createdAt)}
+									</p>
+								</div>
 							</div>
-						</div>
-					))}
-				</div>
-			)}
-		</aside>
+						))}
+					</div>
+				)}
+			</aside>
+		</>
 	);
 };
 

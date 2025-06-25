@@ -19,7 +19,7 @@ const corsOptions = {
 	origin:
 		process.env.NODE_ENV === 'production'
 			? process.env.FRONTEND_URL // Production frontend URL
-			: 'http://localhost:5173', // Development frontend URL
+			: 'http://localhost:5174', // Development frontend URL
 	credentials: true, // Allow cookies to be sent with requests
 };
 app.use(cors(corsOptions));
@@ -46,7 +46,7 @@ const io = new Server(server, {
 		origin:
 			process.env.NODE_ENV === 'production'
 				? process.env.FRONTEND_URL // Production frontend URL
-				: 'http://localhost:5173', // Development frontend URL
+				: 'http://localhost:5174', // Development frontend URL
 	},
 });
 

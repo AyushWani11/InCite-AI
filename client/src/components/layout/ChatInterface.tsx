@@ -39,7 +39,7 @@ interface ChatInterfaceProps {
 
 const backendUrl =
 	process.env.NODE_ENV === 'production'
-		? process.env.BACKEND_URL 
+		? process.env.BACKEND_URL
 		: 'http://localhost:5000/api';
 
 // Custom hook for streaming chat with enhanced features
@@ -473,7 +473,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedPaper }) => {
 					{/* TTS Toggle */}
 					<button
 						onClick={toggleTTS}
-						className={`h-10 w-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
+						className={`cursor-pointer h-10 w-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
 							isTTSActive
 								? 'bg-teal-100 text-teal-700 shadow-sm'
 								: 'bg-gray-100 text-gray-500 hover:bg-gray-200'
@@ -605,7 +605,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedPaper }) => {
 					/>
 					<button
 						onClick={() => fileInputRef.current?.click()}
-						className={`h-10 w-10 rounded-lg flex items-center justify-center transition-colors duration-200 ${
+						className={`cursor-pointer h-10 w-10 rounded-lg flex items-center justify-center transition-colors duration-200 ${
 							selectedFile
 								? 'bg-blue-100 text-blue-600'
 								: 'bg-gray-100 text-gray-500 hover:bg-gray-200'
@@ -646,7 +646,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedPaper }) => {
 						{browserSupportsSpeechRecognition && (
 							<button
 								onClick={listening ? stopListening : startListening}
-								className={`absolute right-3 top-1/2 transform -translate-y-1/2 h-6 w-6 rounded flex items-center justify-center transition-colors duration-200 ${
+								className={`cursor-pointer absolute right-3 top-1/2 transform -translate-y-1/2 h-6 w-6 rounded flex items-center justify-center transition-colors duration-200 ${
 									listening
 										? 'text-red-500 animate-pulse'
 										: 'text-gray-400 hover:text-gray-600'
