@@ -69,7 +69,7 @@ router.post(
 			res.cookie('token', token, {
 				httpOnly: true,
 				secure: process.env.NODE_ENV === 'production',
-				sameSite: 'Lax',
+				sameSite: 'none',
 				maxAge: 3 * 60 * 60 * 1000,
 			});
 
@@ -117,9 +117,9 @@ router.post(
 
 			// Set token as an HTTP-only cookie
 			res.cookie('token', token, {
-				httpOnly: true,
+				httpOnly: false,
 				secure: process.env.NODE_ENV === 'production', // Use secure cookies in production
-				sameSite: 'Lax',
+				sameSite: 'none',
 				maxAge: 3 * 60 * 60 * 1000, // Cookie expires in 3 hours
 			});
 
@@ -151,7 +151,7 @@ router.post('/logout', (req, res) => {
 	res.clearCookie('token', {
 		httpOnly: true,
 		secure: true,
-		sameSite: 'Lax',
+		sameSite: 'none',
 	});
 	res.status(200).json({ msg: 'Logged out successfully' });
 });
