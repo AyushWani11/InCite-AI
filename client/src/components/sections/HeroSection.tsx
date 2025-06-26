@@ -132,30 +132,17 @@ const HeroSection: React.FC = () => {
 									</div>
 
 									<div className='flex space-x-2'>
-										<input
-											type='text'
-											placeholder='What are the key findings?'
-											className='flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm'
-											readOnly
-										/>
-										<Button
-											size='sm'
-											className='bg-teal-500 hover:bg-teal-600'
-											disabled
-										>
+										<div className='flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm'></div>
+										<Button size='sm' className='bg-teal-500'>
 											<ArrowRight className='w-4 h-4' />
 										</Button>
 									</div>
 
 									<div className='flex space-x-4'>
-										<Button
-											size='sm'
-											className='bg-teal-500 hover:bg-teal-600'
-											disabled
-										>
+										<Button size='sm' className='bg-teal-500'>
 											Get Summary
 										</Button>
-										<Button variant='outline' size='sm' disabled>
+										<Button variant='outline' size='sm'>
 											Chat with Paper
 										</Button>
 									</div>
@@ -164,7 +151,7 @@ const HeroSection: React.FC = () => {
 						</div>
 
 						{/* Floating elements for visual interest */}
-						<div className='absolute -top-4 -right-4 w-8 h-8 bg-teal-200 rounded-full opacity-60'></div>
+						<div className='absolute -top-4 -right-4 w-12 h-12 bg-teal-200 rounded-full opacity-60'></div>
 						<div className='absolute -bottom-4 -left-4 w-12 h-12 bg-blue-200 rounded-full opacity-40'></div>
 					</div>
 				</div>
