@@ -48,7 +48,9 @@ const SidebarPapers: React.FC<SidebarPapersProps> = ({
 				});
 
 				if (!res.ok) {
-					throw new Error(`Failed to fetch papers: ${res.status}`);
+					throw new Error(
+						`Failed to fetch papers: ${res.status} \n Please login to view your papers.`
+					);
 				}
 
 				const data: Paper[] = await res.json();

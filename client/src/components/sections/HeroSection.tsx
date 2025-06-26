@@ -138,16 +138,24 @@ const HeroSection: React.FC = () => {
 											className='flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm'
 											readOnly
 										/>
-										<Button size='sm' className='bg-teal-500 hover:bg-teal-600'>
+										<Button
+											size='sm'
+											className='bg-teal-500 hover:bg-teal-600'
+											disabled
+										>
 											<ArrowRight className='w-4 h-4' />
 										</Button>
 									</div>
 
 									<div className='flex space-x-4'>
-										<Button size='sm' className='bg-teal-500 hover:bg-teal-600'>
+										<Button
+											size='sm'
+											className='bg-teal-500 hover:bg-teal-600'
+											disabled
+										>
 											Get Summary
 										</Button>
-										<Button variant='outline' size='sm'>
+										<Button variant='outline' size='sm' disabled>
 											Chat with Paper
 										</Button>
 									</div>
