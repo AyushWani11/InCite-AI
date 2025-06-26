@@ -57,7 +57,9 @@ const SidebarPapers: React.FC<SidebarPapersProps> = ({
 				setPapers(data);
 			} catch (err) {
 				console.error('Error fetching user papers:', err);
-				setError('Failed to load your papers. Please try again.');
+				setError(
+					`Failed to load papers. Please login to be able to use the services.`
+				);
 			} finally {
 				setLoading(false);
 			}
