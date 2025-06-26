@@ -133,13 +133,13 @@ const HeroSection: React.FC = () => {
 
 									<div className='flex space-x-2'>
 										<div className='flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm'></div>
-										<Button size='sm' className='bg-teal-500'>
+										<Button size='sm' className='bg-teal-500 hover:bg-teal-500'>
 											<ArrowRight className='w-4 h-4' />
 										</Button>
 									</div>
 
 									<div className='flex space-x-4'>
-										<Button size='sm' className='bg-teal-500'>
+										<Button size='sm' className='bg-teal-500 hover:bg-teal-500'>
 											Get Summary
 										</Button>
 										<Button variant='outline' size='sm'>
