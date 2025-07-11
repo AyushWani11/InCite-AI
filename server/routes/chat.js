@@ -146,7 +146,7 @@ router.post('/', authLogin, upload.single('file'), async (req, res) => {
 		let sourceLabel = 'uploaded file';
 
 		if (!fileContent) {
-			const { Paper } = require('../models/paper');
+			const Paper = require('../models/paper');
 
 			let inferredPaperId = paperId;
 
@@ -217,12 +217,10 @@ Return ONLY the index of the most relevant paper.
 		}
 
 		if (!context || context.trim().length < 20) {
-			return res
-				.status(400)
-				.json({
-					error:
-						'No context available to answer that. Please select or upload a paper.',
-				});
+			return res.status(400).json({
+				error:
+					'No context available to answer that. Please select or upload a paper.',
+			});
 		}
 
 		// Use validated history instead of raw chatHistory
