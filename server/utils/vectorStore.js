@@ -51,7 +51,7 @@ async function embedText(text) {
 	const embedding = result?.embedding?.values;
 
 	if (!Array.isArray(embedding)) {
-		console.error('❌ Invalid embedding structure:', result);
+		console.error('Invalid embedding structure:', result);
 		throw new Error('Gemini did not return a valid embedding array');
 	}
 
