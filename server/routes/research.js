@@ -7,6 +7,8 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const authLogin = require('../middleware/authToken');
 const Paper = require('../models/paper');
 const { addPaperChunks } = require('../utils/vectorStore');
+const { deleteVectorsByUser } = require('../utils/vectorStore');
+const { deleteVectorsByPaper } = require('../utils/vectorStore');
 
 require('dotenv').config();
 
@@ -16,14 +18,14 @@ const upload = multer({ storage: multer.memoryStorage() });
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
-// 📌 Helper
+// Helper
 function isValidDate(date) {
 	if (!date) return false;
 	const d = new Date(date);
 	return !isNaN(d.getTime());
 }
 
-// 📥 Upload papers
+// Upload papers
 router.post(
 	'/upload',
 	authLogin,
@@ -114,8 +116,12 @@ ${text.substring(0, 6000)}
 							});
 							await paper.save();
 
-							// ✅ Embed paper into Chroma
-							await addPaperChunks(paper._id.toString(), paper.title, text);
+							await addPaperChunks(
+								paper._id.toString(),
+								userId,
+								paper.title,
+								text
+							);
 
 							savedPapers.push(paper);
 
@@ -131,7 +137,7 @@ ${text.substring(0, 6000)}
 	}
 );
 
-// 🔍 Search papers
+// Search papers
 router.get('/search', authLogin, async (req, res) => {
 	const { title, author, keyword, fromDate, toDate, uploadedBy } = req.query;
 	const query = {};
@@ -155,7 +161,7 @@ router.get('/search', authLogin, async (req, res) => {
 	}
 });
 
-// 📥 Download paper
+// Download paper
 router.get('/download/:filename', async (req, res) => {
 	try {
 		const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
@@ -267,8 +273,9 @@ router.delete('/delete-all', authLogin, async (req, res) => {
 			}
 		}
 
-		// Delete from MongoDB collection
 		await Paper.deleteMany({ uploadedBy: userId });
+
+		await deleteVectorsByUser(userId);
 
 		res.status(200).json({ msg: 'All your papers have been deleted' });
 	} catch (err) {
@@ -277,7 +284,6 @@ router.delete('/delete-all', authLogin, async (req, res) => {
 	}
 });
 
-// 🗑️ Delete paper
 router.delete('/delete/:id', authLogin, async (req, res) => {
 	try {
 		const paper = await Paper.findById(req.params.id);
@@ -293,6 +299,11 @@ router.delete('/delete/:id', authLogin, async (req, res) => {
 
 		for (const file of files) await bucket.delete(file._id);
 		await Paper.findByIdAndDelete(req.params.id);
+
+		await deleteVectorsByPaper(
+			paper._id.toString(),
+			paper.uploadedBy.toString()
+		);
 
 		res.status(200).json({ msg: 'Paper deleted' });
 	} catch (err) {

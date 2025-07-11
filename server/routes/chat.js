@@ -146,7 +146,52 @@ router.post('/', authLogin, upload.single('file'), async (req, res) => {
 		let sourceLabel = 'uploaded file';
 
 		if (!fileContent) {
-			const topChunks = await searchRelevantChunks(userQuestion, 4);
+			const { Paper } = require('../models/paper');
+
+			let inferredPaperId = paperId;
+
+			if (!paperId) {
+				const userPapers = await Paper.find({ uploadedBy: req.user.id }).select(
+					'title _id'
+				);
+
+				const titleList = userPapers
+					.map((p, idx) => `${idx + 1}. ${p.title}`)
+					.join('\n');
+
+				const disambiguationPrompt = `
+You are an intelligent research assistant. Based on the user's question, choose the most relevant paper from the list.
+
+User Question: "${userQuestion}"
+
+Paper Titles:
+${titleList}
+
+Return ONLY the index of the most relevant paper.
+`;
+
+				const result = await model.generateContent(disambiguationPrompt);
+				const answerText = result.response.text().trim();
+
+				const selectedIndex =
+					parseInt(answerText.match(/\d+/)?.[0] || '-1', 10) - 1;
+
+				if (selectedIndex >= 0 && selectedIndex < userPapers.length) {
+					inferredPaperId = userPapers[selectedIndex]._id.toString();
+					console.log('📘 Inferred paper:', userPapers[selectedIndex].title);
+				} else {
+					console.warn(
+						'⚠️ Could not confidently infer paper, falling back to all chunks.'
+					);
+				}
+			}
+
+			const topChunks = await searchRelevantChunks(
+				userQuestion,
+				4,
+				inferredPaperId,
+				req.user.id
+			);
 			if (!topChunks.length) {
 				return res
 					.status(404)
@@ -155,7 +200,9 @@ router.post('/', authLogin, upload.single('file'), async (req, res) => {
 			context = topChunks
 				.map((c, i) => `Chunk ${i + 1} (from "${c.meta.title}"):\n${c.text}`)
 				.join('\n\n');
-			sourceLabel = topChunks[0].meta.title || 'related paper';
+			sourceLabel = inferredPaperId
+				? topChunks[0].meta.title
+				: 'best-matched paper';
 		} else {
 			context = fileContent;
 		}

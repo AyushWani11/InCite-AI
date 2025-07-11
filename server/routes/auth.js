@@ -7,8 +7,6 @@ const mongoose = require('mongoose');
 const User = require('../models/user'); // User model
 const authLogin = require('../middleware/authToken');
 
-// Configure
-
 // JWT secret key
 const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret';
 
@@ -42,30 +40,25 @@ router.post(
 		const { username, email, password, confirmPassword } = req.body;
 
 		try {
-			// Check if user already exists
 			let user = await User.findOne({ email });
 			if (user) {
 				return res.status(400).json({ msg: 'User already exists' });
 			}
 
-			// Create new user instance
 			user = new User({
 				username,
 				email,
 				password,
 			});
 
-			// Set the virtual field confirmPassword
 			user.confirmPassword = confirmPassword;
 
-			// Save user to the database (pre-save hook will validate + hash password)
 			await user.save();
 
 			// Generate JWT token
 			const payload = { user: { id: user.id } };
 			const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '3h' });
 
-			// Set token as an HTTP-only cookie
 			res.cookie('token', token, {
 				httpOnly: true,
 				secure: process.env.NODE_ENV === 'production',
@@ -99,27 +92,24 @@ router.post(
 		const { email, password } = req.body;
 
 		try {
-			// Find user by email
 			let user = await User.findOne({ email });
 			if (!user) {
 				return res.status(400).json({ msg: 'Invalid credentials' });
 			}
 
-			// Verify password
 			const isMatch = await bcrypt.compare(password, user.password);
 			if (!isMatch) {
 				return res.status(400).json({ msg: 'Invalid credentials' });
 			}
 
-			// Generate JWT token
 			const payload = { user: { id: user.id } };
 			const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '3h' });
 
 			// Set token as an HTTP-only cookie
 			res.cookie('token', token, {
-				httpOnly: false,
+				httpOnly: true,
 				secure: process.env.NODE_ENV === 'production', // Use secure cookies in production
-				sameSite: 'none',
+				sameSite: 'None',
 				maxAge: 3 * 60 * 60 * 1000, // Cookie expires in 3 hours
 			});
 

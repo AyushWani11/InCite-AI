@@ -30,7 +30,7 @@ function splitIntoSentences(text, maxChunkSize = 400) {
 	return chunks;
 }
 
-// 🔹 Embed a string of text using Gemini
+// Embed a string of text using Gemini
 async function embedText(text) {
 	const cleaned = text
 		.replace(/[^a-zA-Z0-9\s.,;:?!()'"-]/g, '')
@@ -58,17 +58,11 @@ async function embedText(text) {
 	return embedding;
 }
 
-// ✅ Add chunks from a paper to Pinecone
-async function addPaperChunks(paperId, title, text) {
+async function addPaperChunks(paperId, userId, title, text) {
 	const index = pc.index(indexName);
 	const ns = index.namespace(namespaceName);
 
-	const chunkSize = 1000;
 	const chunks = splitIntoSentences(text);
-
-	for (let i = 0; i < text.length; i += chunkSize) {
-		chunks.push(text.slice(i, i + chunkSize));
-	}
 
 	const vectors = await Promise.all(
 		chunks.map(async (chunk, i) => {
@@ -78,6 +72,7 @@ async function addPaperChunks(paperId, title, text) {
 				values: embedding,
 				metadata: {
 					paperId,
+					userId,
 					title,
 					chunkIndex: i,
 					text: chunk,
@@ -91,24 +86,69 @@ async function addPaperChunks(paperId, title, text) {
 }
 
 // ✅ Search relevant chunks given a question
-async function searchRelevantChunks(query, topK = 4) {
+async function searchRelevantChunks(
+	query,
+	topK = 4,
+	paperId = null,
+	userId = null
+) {
 	const index = pc.index(indexName);
 	const ns = index.namespace(namespaceName);
 
 	const queryEmbedding = await embedText(query);
 
-	const result = await ns.query({
+	const pineconeQuery = {
 		topK,
 		vector: queryEmbedding,
 		includeMetadata: true,
 		includeValues: false,
-	});
+	};
+
+	if (paperId && userId) {
+		pineconeQuery.filter = { paperId, userId };
+	} else if (userId) {
+		pineconeQuery.filter = { userId };
+	} else if (paperId) {
+		pineconeQuery.filter = { paperId };
+	}
+
+	const result = await ns.query(pineconeQuery);
 
 	return result.matches.map((match) => ({
 		text: match.metadata.text,
 		meta: match.metadata,
 		score: match.score,
 	}));
+}
+
+async function deleteVectorsByUser(userId) {
+	const index = pc.index(indexName);
+	const ns = index.namespace(namespaceName);
+
+	try {
+		await ns.deleteMany({
+			filter: { userId },
+		});
+		console.log(`All vectors deleted for user ${userId}`);
+	} catch (err) {
+		console.error('Failed to delete vectors by userId:', err);
+		throw err;
+	}
+}
+
+async function deleteVectorsByPaper(paperId, userId = null) {
+	const index = pc.index(indexName);
+	const ns = index.namespace(namespaceName);
+
+	const filter = userId ? { paperId, userId } : { paperId };
+
+	try {
+		await ns.deleteMany({ filter });
+		console.log(`Vectors deleted for paper ${paperId}`);
+	} catch (err) {
+		console.error('Failed to delete vectors by paperId:', err);
+		throw err;
+	}
 }
 
 module.exports = {
