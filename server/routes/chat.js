@@ -155,6 +155,15 @@ router.post('/', authLogin, upload.single('file'), async (req, res) => {
 					'title _id'
 				);
 
+				if (userPapers.length === 0) {
+					return res.status(400).json({
+						error:
+							'You have no papers uploaded. Please upload or select a paper first.',
+					});
+				}
+
+				console.log('📄 User papers:', userPapers);
+
 				const titleList = userPapers
 					.map((p, idx) => `${idx + 1}. ${p.title}`)
 					.join('\n');
@@ -205,6 +214,15 @@ Return ONLY the index of the most relevant paper.
 				: 'best-matched paper';
 		} else {
 			context = fileContent;
+		}
+
+		if (!context || context.trim().length < 20) {
+			return res
+				.status(400)
+				.json({
+					error:
+						'No context available to answer that. Please select or upload a paper.',
+				});
 		}
 
 		// Use validated history instead of raw chatHistory
