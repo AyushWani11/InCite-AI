@@ -305,15 +305,17 @@ router.delete('/delete/:id', authLogin, async (req, res) => {
 		// 	paper.uploadedBy.toString()
 		// );
 
+		res.status(200).json({ msg: 'Paper deleted' });
+
 		deleteVectorsByPaper(
 			paper._id.toString(),
 			paper.uploadedBy.toString()
-		).catch((err) => console.error('Vector deletion failed:', err));
-
-		res.status(200).json({ msg: 'Paper deleted' });
+		).catch((err) => console.error('❌ Vector deletion failed:', err));
 	} catch (err) {
-		console.error(err);
-		res.status(500).json({ error: 'Deletion failed' });
+		console.error('❌ Delete route failed:', err);
+		if (!res.headersSent) {
+			res.status(500).json({ error: 'Deletion failed' });
+		}
 	}
 });
 
