@@ -300,10 +300,15 @@ router.delete('/delete/:id', authLogin, async (req, res) => {
 		for (const file of files) await bucket.delete(file._id);
 		await Paper.findByIdAndDelete(req.params.id);
 
-		await deleteVectorsByPaper(
+		// await deleteVectorsByPaper(
+		// 	paper._id.toString(),
+		// 	paper.uploadedBy.toString()
+		// );
+
+		deleteVectorsByPaper(
 			paper._id.toString(),
 			paper.uploadedBy.toString()
-		);
+		).catch((err) => console.error('Vector deletion failed:', err));
 
 		res.status(200).json({ msg: 'Paper deleted' });
 	} catch (err) {
