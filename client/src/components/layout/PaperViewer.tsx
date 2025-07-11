@@ -495,7 +495,11 @@ const PaperViewer: React.FC<PaperViewerProps> = ({ paper, onClose }) => {
 				method: 'DELETE',
 				credentials: 'include',
 			});
-			if (!res.ok) throw new Error('Delete failed');
+			if (!res.ok) {
+				const errText = await res.text();
+				throw new Error(errText || 'Delete failed');
+			}
+			await res.json();
 			onClose();
 			window.location.reload();
 		} catch (err) {
