@@ -167,11 +167,30 @@ const Dashboard: React.FC = () => {
 		);
 	}
 
+	const handlePaperDeleted = () => {
+		setSelectedPaper(null);
+		setRefreshKey((k) => k + 1);
+		setToast({ tone: 'success', text: 'Paper deleted.' });
+	};
+
 	const sidebar = (
-		<SidebarPapers selectedPaper={selectedPaper} onPaperSelect={handlePaperSelect} refreshKey={refreshKey} />
+		<SidebarPapers
+			selectedPaper={selectedPaper}
+			onPaperSelect={handlePaperSelect}
+			refreshKey={refreshKey}
+			showHeading={isDesktop}
+		/>
 	);
 	const chat = <ChatInterface selectedPaper={selectedPaper} />;
-	const viewer = selectedPaper && <PaperViewer paper={selectedPaper} onClose={() => setSelectedPaper(null)} />;
+	// key: each paper gets a fresh viewer, so nothing carries over between papers.
+	const viewer = selectedPaper && (
+		<PaperViewer
+			key={selectedPaper._id}
+			paper={selectedPaper}
+			onClose={() => setSelectedPaper(null)}
+			onDeleted={handlePaperDeleted}
+		/>
+	);
 
 	return (
 		<div className='h-dvh flex flex-col bg-gray-50'>

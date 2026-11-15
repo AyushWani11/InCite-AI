@@ -1,15 +1,30 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
 	FileText,
 	Download,
-	Star,
+	ExternalLink,
+	ClipboardCheck,
 	X,
 	Copy,
-	CheckCircle,
+	Check,
 	Trash2,
+	Loader2,
+	RefreshCw,
+	AlertCircle,
+	AlignLeft,
+	Lightbulb,
+	FlaskConical,
+	ChartColumn,
+	Flag,
+	CircleDot,
+	TriangleAlert,
+	Sparkles,
+	type LucideIcon,
 } from 'lucide-react';
-
+import { clsx } from 'clsx';
+import { Modal, buttonClasses } from '../common';
 import { API_BASE_URL as backendUrl } from '../../config';
+import { NETWORK_ERROR, readError } from '../../utils/http';
 
 interface Paper {
 	_id: string;
@@ -19,744 +34,516 @@ interface Paper {
 	createdAt: string;
 }
 
-interface SummaryType {
-	[key: string]: any;
+// Field names match the server's schemas (server/utils/schemas.js). Older
+// saved results may have other fields, so both views render unknown ones too.
+type Summary = Record<string, unknown>;
+
+interface Assessment {
+	score?: {
+		writingQuality?: string;
+		methodology?: string;
+		academicStandards?: string;
+		overallScore?: number;
+	};
+	feedback?: { writing?: string; methodology?: string; standards?: string };
+	improvementSuggestions?: string[];
+	issues?: string[];
+	'X-Factor'?: string;
 }
 
-interface AssessmentType {
-	score: {
-		writingQuality: string;
-		methodology: string;
-		academicStandards: string;
-		overallScore: number;
-	};
-	feedback: {
-		writing: string;
-		methodology: string;
-		standards: string;
-	};
-	improvementSuggestions: string[];
-	issues: string[];
-	'X-Factor': string;
-}
+type Kind = 'summary' | 'assessment';
 
 interface PaperViewerProps {
 	paper: Paper;
 	onClose: () => void;
+	onDeleted: () => void;
 }
 
-const SummaryIcon = ({ className = 'w-5 h-5' }) => (
-	<svg
-		className={className}
-		viewBox='0 0 24 24'
-		fill='none'
-		stroke='currentColor'
-		strokeWidth='2'
-	>
-		<rect x='3' y='3' width='18' height='18' rx='2' />
-		<path d='M9 9h6M9 13h6M9 17h4' />
-	</svg>
-);
-
-const ContributionIcon = ({ className = 'w-5 h-5' }) => (
-	<svg
-		className={className}
-		viewBox='0 0 24 24'
-		fill='none'
-		stroke='currentColor'
-		strokeWidth='2'
-	>
-		<circle cx='12' cy='12' r='3' />
-		<path d='M12 1v6M12 17v6M4.22 4.22l4.24 4.24M15.54 15.54l4.24 4.24M1 12h6M17 12h6M4.22 19.78l4.24-4.24M15.54 8.46l4.24-4.24' />
-	</svg>
-);
-
-const MethodIcon = ({ className = 'w-5 h-5' }) => (
-	<svg
-		className={className}
-		viewBox='0 0 24 24'
-		fill='none'
-		stroke='currentColor'
-		strokeWidth='2'
-	>
-		<path d='M12 2L2 7l10 5 10-5-10-5z' />
-		<path d='M2 17l10 5 10-5M2 12l10 5 10-5' />
-	</svg>
-);
-
-const ResultIcon = ({ className = 'w-5 h-5' }) => (
-	<svg
-		className={className}
-		viewBox='0 0 24 24'
-		fill='none'
-		stroke='currentColor'
-		strokeWidth='2'
-	>
-		<path d='M3 3v18h18' />
-		<path d='M18 17l-5-5-5 5' />
-	</svg>
-);
-
-const ConclusionIcon = ({ className = 'w-5 h-5' }) => (
-	<svg
-		className={className}
-		viewBox='0 0 24 24'
-		fill='none'
-		stroke='currentColor'
-		strokeWidth='2'
-	>
-		<polyline points='20 6 9 17 4 12' />
-	</svg>
-);
-
-const LimitationIcon = ({ className = 'w-5 h-5' }) => (
-	<svg
-		className={className}
-		viewBox='0 0 24 24'
-		fill='none'
-		stroke='currentColor'
-		strokeWidth='2'
-	>
-		<circle cx='12' cy='12' r='10' />
-		<path d='M15 9l-6 6M9 9l6 6' />
-	</svg>
-);
-
-const FutureIcon = ({ className = 'w-5 h-5' }) => (
-	<svg
-		className={className}
-		viewBox='0 0 24 24'
-		fill='none'
-		stroke='currentColor'
-		strokeWidth='2'
-	>
-		<path d='M5 12l5 5L20 7' />
-		<path d='M13 12l7-7' />
-	</svg>
-);
-
-const DefaultIcon = ({ className = 'w-5 h-5' }) => (
-	<svg
-		className={className}
-		viewBox='0 0 24 24'
-		fill='none'
-		stroke='currentColor'
-		strokeWidth='2'
-	>
-		<circle cx='12' cy='12' r='2' />
-		<path d='M12 2v4M12 18v4M4 12h4M16 12h4' />
-	</svg>
-);
-
-// Modal Component
-interface ModalProps {
-	isOpen: boolean;
-	onClose: () => void;
-	title: string;
-	children: React.ReactNode;
-}
-
-const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children }) => {
-	if (!isOpen) return null;
-
-	return (
-		<div className='fixed inset-0 bg-black/20 bg-opacity-60 z-50 flex items-center justify-center p-4 backdrop-blur-lg'>
-			<div className='bg-white rounded-2xl shadow-2xl max-w-5xl w-full max-h-[92vh] flex flex-col border border-gray-200'>
-				<div className='flex items-center justify-between p-6 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50'>
-					<div className='flex items-center space-x-3'>
-						<div className='w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center'>
-							<FileText className='w-4 h-4 text-blue-600' />
-						</div>
-						<h2 className='text-xl font-semibold text-gray-800'>{title}</h2>
-					</div>
-					<button
-						onClick={onClose}
-						className='p-2 text-gray-400 hover:text-gray-600 hover:bg-white hover:shadow-md rounded-lg transition-all duration-200'
-					>
-						<X className='w-5 h-5' />
-					</button>
-				</div>
-				<div className='flex-1 overflow-auto p-6 bg-gray-50'>{children}</div>
-			</div>
-		</div>
-	);
+const SUMMARY_SECTIONS: Record<string, { title: string; icon: LucideIcon }> = {
+	summary: { title: 'Summary', icon: AlignLeft },
+	contributions: { title: 'Key contributions', icon: Lightbulb },
+	methodology: { title: 'Methodology', icon: FlaskConical },
+	findings: { title: 'Findings', icon: ChartColumn },
+	conclusion: { title: 'Conclusion', icon: Flag },
 };
 
-// Summary Display Component
-const SummaryDisplay: React.FC<{ summary: SummaryType }> = ({ summary }) => {
-	const [copied, setCopied] = useState(false);
+// Known sections first, in a sensible reading order, then anything else.
+const summaryKeys = (summary: Summary) => [
+	...Object.keys(SUMMARY_SECTIONS).filter((k) => k in summary),
+	...Object.keys(summary).filter((k) => !(k in SUMMARY_SECTIONS)),
+];
+const sectionTitle = (key: string) =>
+	SUMMARY_SECTIONS[key]?.title ??
+	key
+		.replace(/([A-Z])/g, ' $1')
+		.replace(/^./, (c) => c.toUpperCase())
+		.trim();
+const unquote = (text: string) => text.replace(/^["']|["']$/g, '');
+const plain = (value: unknown) =>
+	Array.isArray(value)
+		? value.map((item, i) => `${i + 1}. ${unquote(String(item))}`).join('\n')
+		: value && typeof value === 'object'
+			? JSON.stringify(value, null, 2)
+			: unquote(String(value ?? ''));
 
-	const copyToClipboard = () => {
-		navigator.clipboard.writeText(JSON.stringify(summary, null, 2));
-		setCopied(true);
-		setTimeout(() => setCopied(false), 2000);
-	};
+const summaryAsText = (summary: Summary) =>
+	summaryKeys(summary)
+		.map((key) => `${sectionTitle(key)}\n${plain(summary[key])}`)
+		.join('\n\n');
 
-	const formatSectionTitle = (key: string) => {
-		return key
-			.replace(/([A-Z])/g, ' $1')
-			.replace(/^./, (str) => str.toUpperCase())
-			.trim();
-	};
+const assessmentAsText = (a: Assessment) =>
+	[
+		`Overall score: ${a.score?.overallScore ?? '?'}/100`,
+		`Writing quality: ${a.score?.writingQuality ?? '?'}`,
+		`Methodology: ${a.score?.methodology ?? '?'}`,
+		`Academic standards: ${a.score?.academicStandards ?? '?'}`,
+		'',
+		'Feedback',
+		`Writing: ${a.feedback?.writing ?? ''}`,
+		`Methodology: ${a.feedback?.methodology ?? ''}`,
+		`Academic standards: ${a.feedback?.standards ?? ''}`,
+		'',
+		'Suggestions',
+		plain(a.improvementSuggestions ?? []),
+		'',
+		'Issues',
+		a.issues?.length ? plain(a.issues) : 'None found.',
+		'',
+		'What stands out',
+		a['X-Factor'] ?? '',
+	].join('\n');
 
-	const renderContent = (key: string, value: any) => {
-		// Handle contributions specifically
-		if (key.toLowerCase().includes('contribution') && Array.isArray(value)) {
-			return (
-				<div className='space-y-3'>
-					{value.map((contribution, index) => (
-						<div
-							key={index}
-							className='flex items-start space-x-3 p-3 bg-white rounded-lg border border-gray-200'
-						>
-							<div className='flex-shrink-0 w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-sm font-medium mt-0.5'>
-								{index + 1}
-							</div>
-							<div className='flex-1 text-gray-700 leading-relaxed'>
-								{typeof contribution === 'string'
-									? contribution.replace(/^["']|["']$/g, '')
-									: String(contribution)}
-							</div>
-						</div>
-					))}
-				</div>
-			);
-		}
+const formatDate = (date: string) =>
+	new Date(date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 
-		// Handle other arrays (like key points, findings, etc.)
-		if (Array.isArray(value)) {
-			return (
-				<div className='space-y-2'>
-					{value.map((item, index) => (
-						<div key={index} className='flex items-start space-x-2'>
-							<div className='w-2 h-2 bg-blue-500 rounded-full mt-2 flex-shrink-0'></div>
-							<div className='text-gray-700 leading-relaxed'>
-								{typeof item === 'string'
-									? item.replace(/^["']|["']$/g, '')
-									: String(item)}
-							</div>
-						</div>
-					))}
-				</div>
-			);
-		}
+const formatAuthors = (authors?: string[]) => {
+	if (!authors || authors.length === 0) return 'Unknown author';
+	if (authors.length === 1) return authors[0];
+	if (authors.length === 2) return authors.join(' & ');
+	return `${authors[0]} et al.`;
+};
 
-		// Handle objects
-		if (typeof value === 'object' && value !== null) {
-			return (
-				<div className='bg-white rounded-lg border border-gray-200 p-4'>
-					<pre className='text-sm text-gray-600 whitespace-pre-wrap font-mono'>
-						{JSON.stringify(value, null, 2)}
-					</pre>
-				</div>
-			);
-		}
-
-		// Handle strings and other primitives
-		const stringValue = String(value).replace(/^["']|["']$/g, '');
+const Value: React.FC<{ value: unknown; numbered?: boolean }> = ({ value, numbered }) => {
+	if (Array.isArray(value)) {
+		const List = numbered ? 'ol' : 'ul';
 		return (
-			<div className='text-gray-700 leading-relaxed whitespace-pre-wrap'>
-				{stringValue}
-			</div>
-		);
-	};
-
-	const getSectionIcon = (key: string) => {
-		const lowerKey = key.toLowerCase();
-
-		if (lowerKey.includes('contribution')) {
-			return <ContributionIcon className='w-5 h-5 text-blue-600' />;
-		}
-		if (lowerKey.includes('abstract') || lowerKey.includes('summary')) {
-			return <SummaryIcon className='w-5 h-5 text-indigo-600' />;
-		}
-		if (lowerKey.includes('method') || lowerKey.includes('approach')) {
-			return <MethodIcon className='w-5 h-5 text-purple-600' />;
-		}
-		if (lowerKey.includes('result') || lowerKey.includes('finding')) {
-			return <ResultIcon className='w-5 h-5 text-green-600' />;
-		}
-		if (lowerKey.includes('conclusion')) {
-			return <ConclusionIcon className='w-5 h-5 text-teal-600' />;
-		}
-		if (lowerKey.includes('limitation')) {
-			return <LimitationIcon className='w-5 h-5 text-red-600' />;
-		}
-		if (lowerKey.includes('future') || lowerKey.includes('recommendation')) {
-			return <FutureIcon className='w-5 h-5 text-orange-600' />;
-		}
-
-		return <DefaultIcon className='w-5 h-5 text-gray-600' />;
-	};
-
-	return (
-		<div className='space-y-6'>
-			<div className='flex justify-between items-center'>
-				<div className='text-sm text-gray-500'>
-					Analysis generated • {Object.keys(summary).length} sections
-				</div>
-				<button
-					onClick={copyToClipboard}
-					className='flex items-center space-x-2 px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors'
-				>
-					{copied ? (
-						<CheckCircle className='w-4 h-4 text-green-600' />
-					) : (
-						<Copy className='w-4 h-4' />
-					)}
-					<span>{copied ? 'Copied!' : 'Copy JSON'}</span>
-				</button>
-			</div>
-
-			{Object.entries(summary).map(([key, value]) => (
-				<div
-					key={key}
-					className='bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl p-6 border border-gray-200'
-				>
-					<div className='flex items-center space-x-3 mb-4'>
-						<span className='text-xl'>{getSectionIcon(key)}</span>
-						<h3 className='text-lg font-semibold text-gray-800'>
-							{formatSectionTitle(key)}
-						</h3>
-						<div className='flex-1 h-px bg-gradient-to-r from-gray-300 to-transparent'></div>
-					</div>
-					<div className='ml-8'>{renderContent(key, value)}</div>
-				</div>
-			))}
-		</div>
-	);
-};
-
-// Assessment Display Component
-const AssessmentDisplay: React.FC<{ assessment: AssessmentType }> = ({
-	assessment,
-}) => {
-	const [copied, setCopied] = useState(false);
-
-	const copyToClipboard = () => {
-		navigator.clipboard.writeText(JSON.stringify(assessment, null, 2));
-		setCopied(true);
-		setTimeout(() => setCopied(false), 2000);
-	};
-
-	return (
-		<div className='space-y-6'>
-			<div className='flex justify-end'>
-				<button
-					onClick={copyToClipboard}
-					className='flex items-center space-x-2 px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors'
-				>
-					{copied ? (
-						<CheckCircle className='w-4 h-4 text-green-600' />
-					) : (
-						<Copy className='w-4 h-4' />
-					)}
-					<span>{copied ? 'Copied!' : 'Copy JSON'}</span>
-				</button>
-			</div>
-
-			{/* Overall Score */}
-			<div className='bg-blue-50 rounded-lg p-4'>
-				<h3 className='font-medium text-blue-800 mb-2'>Overall Score</h3>
-				<div className='text-2xl font-bold text-blue-600'>
-					{assessment.score.overallScore}/100
-				</div>
-			</div>
-
-			{/* Individual Scores */}
-			<div className='grid grid-cols-1 md:grid-cols-3 gap-4'>
-				<div className='bg-gray-50 rounded-lg p-4'>
-					<h4 className='font-medium text-gray-800 mb-1'>Writing Quality</h4>
-					<div className='text-gray-600'>{assessment.score.writingQuality}</div>
-				</div>
-				<div className='bg-gray-50 rounded-lg p-4'>
-					<h4 className='font-medium text-gray-800 mb-1'>Methodology</h4>
-					<div className='text-gray-600'>{assessment.score.methodology}</div>
-				</div>
-				<div className='bg-gray-50 rounded-lg p-4'>
-					<h4 className='font-medium text-gray-800 mb-1'>Academic Standards</h4>
-					<div className='text-gray-600'>
-						{assessment.score.academicStandards}
-					</div>
-				</div>
-			</div>
-
-			{/* Feedback */}
-			<div className='space-y-4'>
-				<h3 className='font-medium text-gray-800'>Detailed Feedback</h3>
-				<div className='bg-gray-50 rounded-lg p-4'>
-					<h4 className='font-medium text-gray-800 mb-2'>Writing</h4>
-					<p className='text-gray-600'>{assessment.feedback.writing}</p>
-				</div>
-				<div className='bg-gray-50 rounded-lg p-4'>
-					<h4 className='font-medium text-gray-800 mb-2'>Methodology</h4>
-					<p className='text-gray-600'>{assessment.feedback.methodology}</p>
-				</div>
-				<div className='bg-gray-50 rounded-lg p-4'>
-					<h4 className='font-medium text-gray-800 mb-2'>Standards</h4>
-					<p className='text-gray-600'>{assessment.feedback.standards}</p>
-				</div>
-			</div>
-
-			{/* Improvement Suggestions */}
-			{assessment.improvementSuggestions &&
-				assessment.improvementSuggestions.length > 0 && (
-					<div className='bg-green-50 rounded-lg p-4'>
-						<h3 className='font-medium text-green-800 mb-2'>
-							Improvement Suggestions
-						</h3>
-						<ul className='space-y-1'>
-							{assessment.improvementSuggestions.map((suggestion, index) => (
-								<li key={index} className='text-green-700 flex items-start'>
-									<span className='mr-2'>•</span>
-									<span>{suggestion}</span>
-								</li>
-							))}
-						</ul>
-					</div>
+			<List
+				className={clsx(
+					'space-y-2 pl-5 leading-relaxed text-gray-700 marker:text-teal-700',
+					numbered ? 'list-decimal' : 'list-disc'
 				)}
+			>
+				{value.map((item, i) => (
+					<li key={i} className='pl-1'>
+						{unquote(String(item))}
+					</li>
+				))}
+			</List>
+		);
+	}
+	if (value && typeof value === 'object') {
+		return (
+			<pre className='whitespace-pre-wrap rounded-lg bg-gray-50 p-3 font-mono text-sm text-gray-700'>
+				{JSON.stringify(value, null, 2)}
+			</pre>
+		);
+	}
+	return <p className='whitespace-pre-wrap leading-relaxed text-gray-700'>{unquote(String(value ?? ''))}</p>;
+};
 
-			{/* Issues */}
-			{assessment.issues && assessment.issues.length > 0 && (
-				<div className='bg-red-50 rounded-lg p-4'>
-					<h3 className='font-medium text-red-800 mb-2'>Issues Identified</h3>
-					<ul className='space-y-1'>
-						{assessment.issues.map((issue, index) => (
-							<li key={index} className='text-red-700 flex items-start'>
-								<span className='mr-2'>•</span>
-								<span>{issue}</span>
-							</li>
-						))}
-					</ul>
+const Card: React.FC<{ title: string; icon: LucideIcon; children: React.ReactNode }> = ({
+	title,
+	icon: Icon,
+	children,
+}) => (
+	<section className='rounded-xl border border-gray-200 bg-white p-5'>
+		<h3 className='mb-3 flex items-center gap-2 text-base font-semibold text-gray-900'>
+			<Icon className='h-5 w-5 text-teal-700' aria-hidden='true' />
+			{title}
+		</h3>
+		{children}
+	</section>
+);
+
+const SummaryView: React.FC<{ summary: Summary }> = ({ summary }) => (
+	<div className='space-y-4'>
+		{summaryKeys(summary).map((key) => (
+			<Card key={key} title={sectionTitle(key)} icon={SUMMARY_SECTIONS[key]?.icon ?? CircleDot}>
+				<Value value={summary[key]} numbered={key === 'contributions'} />
+			</Card>
+		))}
+	</div>
+);
+
+// The rating is written out as well as coloured, so colour is never the only cue.
+const RATING_STYLES: Record<string, string> = {
+	Excellent: 'border-teal-200 bg-teal-50 text-teal-800',
+	Good: 'border-sky-200 bg-sky-50 text-sky-800',
+	Average: 'border-amber-200 bg-amber-50 text-amber-800',
+	Poor: 'border-red-200 bg-red-50 text-red-800',
+};
+const scoreBarColor = (score: number) =>
+	score >= 80 ? 'bg-teal-600' : score >= 60 ? 'bg-sky-600' : score >= 40 ? 'bg-amber-500' : 'bg-red-600';
+
+const AssessmentView: React.FC<{ assessment: Assessment }> = ({ assessment }) => {
+	const score = Math.max(0, Math.min(100, assessment.score?.overallScore ?? 0));
+	const ratings = [
+		['Writing quality', assessment.score?.writingQuality],
+		['Methodology', assessment.score?.methodology],
+		['Academic standards', assessment.score?.academicStandards],
+	] as const;
+	const feedback = [
+		['Writing', assessment.feedback?.writing],
+		['Methodology', assessment.feedback?.methodology],
+		['Academic standards', assessment.feedback?.standards],
+	] as const;
+
+	return (
+		<div className='space-y-4'>
+			<section className='rounded-xl border border-gray-200 bg-white p-5'>
+				<h3 className='text-sm font-medium text-gray-500'>Overall score</h3>
+				<p className='text-4xl font-bold text-gray-900'>
+					{score}
+					<span className='text-lg font-medium text-gray-500'>/100</span>
+				</p>
+				<div className='mt-3 h-2.5 overflow-hidden rounded-full bg-gray-100' aria-hidden='true'>
+					<div className={clsx('h-full rounded-full', scoreBarColor(score))} style={{ width: `${score}%` }} />
 				</div>
+				<dl className='mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3'>
+					{ratings.map(([label, rating]) => (
+						<div key={label} className='rounded-lg border border-gray-200 px-4 py-3'>
+							<dt className='text-sm text-gray-500'>{label}</dt>
+							<dd className='mt-1'>
+								<span
+									className={clsx(
+										'inline-block rounded-full border px-2.5 py-0.5 text-sm font-medium',
+										RATING_STYLES[rating ?? ''] ?? 'border-gray-200 bg-gray-50 text-gray-700'
+									)}
+								>
+									{rating ?? 'Not rated'}
+								</span>
+							</dd>
+						</div>
+					))}
+				</dl>
+			</section>
+
+			<Card title='Feedback' icon={AlignLeft}>
+				<div className='space-y-4'>
+					{feedback.map(([label, text]) => (
+						<div key={label}>
+							<h4 className='text-sm font-semibold text-gray-800'>{label}</h4>
+							<p className='mt-1 leading-relaxed text-gray-700'>{text || '—'}</p>
+						</div>
+					))}
+				</div>
+			</Card>
+
+			{!!assessment.improvementSuggestions?.length && (
+				<Card title='Suggestions' icon={Lightbulb}>
+					<Value value={assessment.improvementSuggestions} />
+				</Card>
 			)}
 
-			{/* X-Factor */}
+			<Card title='Issues found' icon={TriangleAlert}>
+				{assessment.issues?.length ? (
+					<Value value={assessment.issues} />
+				) : (
+					<p className='text-gray-700'>No issues found.</p>
+				)}
+			</Card>
+
 			{assessment['X-Factor'] && (
-				<div className='bg-purple-50 rounded-lg p-4'>
-					<h3 className='font-medium text-purple-800 mb-2'>X-Factor</h3>
-					<p className='text-purple-700'>{assessment['X-Factor']}</p>
-				</div>
+				<Card title='What stands out' icon={Sparkles}>
+					<Value value={assessment['X-Factor']} />
+				</Card>
 			)}
 		</div>
 	);
 };
 
-const PaperViewer: React.FC<PaperViewerProps> = ({ paper, onClose }) => {
-	const [pdfLoading, setPdfLoading] = useState(true);
-	const [pdfError, setPdfError] = useState(false);
-	const [existingSummary, setExistingSummary] = useState<SummaryType | null>(
-		null
+const CopyButton: React.FC<{ text: string }> = ({ text }) => {
+	const [copied, setCopied] = useState(false);
+	const copy = async () => {
+		try {
+			await navigator.clipboard.writeText(text);
+			setCopied(true);
+			setTimeout(() => setCopied(false), 2000);
+		} catch {
+			// Clipboard blocked (e.g. not HTTPS): nothing useful to do.
+		}
+	};
+	return (
+		<button type='button' onClick={copy} className={buttonClasses('ghost', 'sm')}>
+			{copied ? <Check className='h-4 w-4 text-teal-700' aria-hidden='true' /> : <Copy className='h-4 w-4' aria-hidden='true' />}
+			<span aria-live='polite'>{copied ? 'Copied' : 'Copy as text'}</span>
+		</button>
 	);
-	const [existingAssessment, setExistingAssessment] =
-		useState<AssessmentType | null>(null);
-	const [isAnalyzing, setIsAnalyzing] = useState(false);
-	const [analysisType, setAnalysisType] = useState<string | null>(null);
+};
 
-	// Modal states
-	const [showSummaryModal, setShowSummaryModal] = useState(false);
-	const [showAssessmentModal, setShowAssessmentModal] = useState(false);
+const iconButton =
+	'p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500';
 
-	const formatDate = (dateString: string) => {
-		const date = new Date(dateString);
-		return date.toLocaleDateString('en-US', {
-			year: 'numeric',
-			month: 'short',
-			day: 'numeric',
-		});
-	};
-
-	const formatAuthors = (authors?: string[]) => {
-		if (!authors || authors.length === 0) return 'Unknown Author';
-		if (authors.length === 1) return authors[0];
-		if (authors.length === 2) return authors.join(' & ');
-		return `${authors[0]} et al.`;
-	};
+const PaperViewer: React.FC<PaperViewerProps> = ({ paper, onClose, onDeleted }) => {
+	const [summary, setSummary] = useState<Summary | null>(null);
+	const [assessment, setAssessment] = useState<Assessment | null>(null);
+	const [busy, setBusy] = useState<Kind | null>(null);
+	const [analysisError, setAnalysisError] = useState('');
+	const [openModal, setOpenModal] = useState<Kind | null>(null);
+	const [pdfState, setPdfState] = useState<'loading' | 'ready' | 'error'>(paper.filename ? 'loading' : 'error');
+	const [iframeKey, setIframeKey] = useState(0);
+	const [confirmDelete, setConfirmDelete] = useState(false);
+	const [deleting, setDeleting] = useState(false);
+	const [deleteError, setDeleteError] = useState('');
 
 	// Requires the login cookie; the server checks that this paper is yours.
 	const pdfUrl = `${backendUrl}/paper/download/${paper._id}`;
 
-	const handlePdfLoad = () => {
-		setPdfLoading(false);
-		setPdfError(false);
-	};
+	// Load a summary and assessment saved earlier, if there are any. (The
+	// dashboard gives each paper a fresh PaperViewer, so state starts empty.)
+	useEffect(() => {
+		let ignore = false;
+		const load = async (path: string, field: string) => {
+			try {
+				const res = await fetch(`${backendUrl}/paper/${path}/${paper._id}`, { credentials: 'include' });
+				return res.ok ? (await res.json())[field] : null;
+			} catch {
+				return null;
+			}
+		};
+		load('summary', 'summary').then((s) => !ignore && s && setSummary(s));
+		load('assessment', 'assessment').then((a) => !ignore && a && setAssessment(a));
+		return () => {
+			ignore = true;
+		};
+	}, [paper._id]);
 
-	const handlePdfError = () => {
-		setPdfLoading(false);
-		setPdfError(true);
+	const generate = async (kind: Kind) => {
+		setBusy(kind);
+		setAnalysisError('');
+		try {
+			const res = await fetch(`${backendUrl}/paper/${kind === 'summary' ? 'summarize' : 'assess'}/${paper._id}`, {
+				method: 'POST',
+				credentials: 'include',
+			});
+			if (!res.ok) {
+				// e.g. a 502 when the AI's reply was unusable even after a retry.
+				setAnalysisError(await readError(res, `Couldn't create the ${kind}. Please try again.`));
+				return;
+			}
+			const data = await res.json();
+			if (kind === 'summary') setSummary(data.summary);
+			else setAssessment(data.assessment);
+			setOpenModal(kind);
+		} catch {
+			setAnalysisError(NETWORK_ERROR);
+		} finally {
+			setBusy(null);
+		}
 	};
 
 	const handleDelete = async () => {
-		if (!window.confirm('Are you sure you want to delete this paper?')) return;
+		setDeleting(true);
+		setDeleteError('');
 		try {
 			const res = await fetch(`${backendUrl}/paper/delete/${paper._id}`, {
 				method: 'DELETE',
 				credentials: 'include',
 			});
-
-			const result = await res.json();
 			if (!res.ok) {
-				throw new Error(result?.error || 'Delete failed');
-			}
-			console.log('✅ Delete response:', result.msg);
-			onClose();
-			window.location.reload();
-		} catch (err) {
-			console.error('Deletion error:', err);
-			alert('Failed to delete paper. Please try again.');
-		}
-	};
-
-	useEffect(() => {
-		setPdfLoading(true);
-		setPdfError(false);
-		setIsAnalyzing(false);
-		setAnalysisType(null);
-		setExistingSummary(null);
-		setExistingAssessment(null);
-
-		fetch(`${backendUrl}/paper/summary/${paper._id}`, {
-			method: 'GET',
-			credentials: 'include',
-			headers: { 'Content-Type': 'application/json' },
-		})
-			.then(async (res) => {
-				if (res.ok) {
-					const json = await res.json();
-					setExistingSummary(json.summary);
-				} else {
-					setExistingSummary(null);
-				}
-			})
-			.catch(() => {
-				setExistingSummary(null);
-			});
-
-		fetch(`${backendUrl}/paper/assessment/${paper._id}`, {
-			method: 'GET',
-			credentials: 'include',
-			headers: { 'Content-Type': 'application/json' },
-		})
-			.then(async (res) => {
-				if (res.ok) {
-					const json = await res.json();
-					setExistingAssessment(json.assessment);
-				} else {
-					setExistingAssessment(null);
-				}
-			})
-			.catch(() => {
-				setExistingAssessment(null);
-			});
-	}, [paper._id]);
-
-	const handleAnalysis = async (type: 'summarize' | 'assess') => {
-		setIsAnalyzing(true);
-		setAnalysisType(type);
-
-		try {
-			const endpoint =
-				type === 'summarize'
-					? `${backendUrl}/paper/summarize/${paper._id}`
-					: `${backendUrl}/paper/assess/${paper._id}`;
-
-			const response = await fetch(endpoint, {
-				method: 'POST',
-				credentials: 'include',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({}),
-			});
-
-			if (!response.ok) {
-				// The server explains what went wrong (e.g. a 502 when the AI's
-				// reply was unusable even after a retry); show that message.
-				const body = await response.json().catch(() => ({}));
-				alert(body.error || `Failed to ${type} paper. Please try again.`);
+				setDeleteError(await readError(res, 'Couldn’t delete the paper. Please try again.'));
 				return;
 			}
-
-			const result = await response.json();
-
-			if (type === 'summarize') {
-				setExistingSummary(result.summary);
-				setShowSummaryModal(true);
-			} else {
-				setExistingAssessment(result.assessment);
-				setShowAssessmentModal(true);
-			}
+			onDeleted();
 		} catch {
-			// Network error: the server could not be reached at all.
-			alert(`Failed to ${type} paper. Please try again.`);
+			setDeleteError(NETWORK_ERROR);
 		} finally {
-			setIsAnalyzing(false);
-			setAnalysisType(null);
+			setDeleting(false);
 		}
 	};
 
-	const viewSummary = () => {
-		if (!existingSummary) return;
-		setShowSummaryModal(true);
+	const closeModal = () => {
+		setOpenModal(null);
+		setAnalysisError('');
 	};
 
-	const viewAssessment = () => {
-		if (!existingAssessment) return;
-		setShowAssessmentModal(true);
+	const analysisButton = (kind: Kind) => {
+		const saved = kind === 'summary' ? summary : assessment;
+		const Icon = kind === 'summary' ? FileText : ClipboardCheck;
+		const working = busy === kind;
+		const label = working
+			? kind === 'summary'
+				? 'Summarizing…'
+				: 'Assessing…'
+			: saved
+				? `View ${kind}`
+				: kind === 'summary'
+					? 'Summarize paper'
+					: 'Assess paper';
+		return (
+			<button
+				type='button'
+				onClick={() => (saved ? setOpenModal(kind) : generate(kind))}
+				disabled={!saved && busy !== null}
+				className={buttonClasses(saved ? 'outline' : 'primary', 'md')}
+			>
+				{working ? (
+					<Loader2 className='h-4 w-4 animate-spin' aria-hidden='true' />
+				) : (
+					<Icon className='h-4 w-4' aria-hidden='true' />
+				)}
+				{label}
+			</button>
+		);
 	};
+
+	const modalFooter = (kind: Kind, text: string) => (
+		<div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
+			{analysisError ? (
+				<p role='alert' className='text-sm text-red-600'>
+					{analysisError}
+				</p>
+			) : (
+				<p className='text-sm text-gray-500'>
+					{busy === kind
+						? 'Writing a new version from the whole paper…'
+						: 'Written by AI. Check important details against the paper.'}
+				</p>
+			)}
+			<div className='flex shrink-0 gap-2'>
+				<CopyButton text={text} />
+				<button
+					type='button'
+					onClick={() => generate(kind)}
+					disabled={busy !== null}
+					className={buttonClasses('outline', 'sm')}
+				>
+					{busy === kind ? (
+						<Loader2 className='h-4 w-4 animate-spin' aria-hidden='true' />
+					) : (
+						<RefreshCw className='h-4 w-4' aria-hidden='true' />
+					)}
+					Regenerate
+				</button>
+			</div>
+		</div>
+	);
 
 	return (
-		<div className='h-full flex flex-col bg-gray-50'>
-			<div className='bg-white border-b border-gray-100 shadow-sm'>
-				<div className='p-4 border-b border-gray-50'>
-					<div className='flex items-center justify-between'>
-						<div className='flex-1 min-w-0'>
-							<h1 className='text-lg font-semibold text-gray-800 truncate mb-1'>
-								{paper.title}
-							</h1>
-							<div className='flex items-center space-x-4 text-sm text-gray-500'>
-								<span>{formatAuthors(paper.authors)}</span>
-								<span>•</span>
-								<span>{formatDate(paper.createdAt)}</span>
-							</div>
-						</div>
-						<div className='flex items-center space-x-2 ml-4'>
-							<a
-								href={pdfUrl}
-								download
-								className='p-2 text-gray-400 hover:text-teal-600 hover:bg-teal-50 rounded-md transition-all duration-200'
-								title='Download PDF'
-							>
-								<Download className='w-4 h-4' />
-							</a>
-							<button
-								onClick={handleDelete}
-								className='cursor-pointer p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-all duration-200'
-								title='Delete Paper'
-							>
-								<Trash2 className='w-4 h-4' />
-							</button>
+		<div className='h-full flex flex-col bg-white'>
+			<div className='border-b border-gray-200'>
+				<div className='flex items-start justify-between gap-3 px-4 pt-3 sm:px-5'>
+					<div className='min-w-0'>
+						<h2 className='truncate text-base font-semibold text-gray-900 sm:text-lg' title={paper.title}>
+							{paper.title}
+						</h2>
+						<p className='truncate text-sm text-gray-500'>
+							{formatAuthors(paper.authors)} · {formatDate(paper.createdAt)}
+						</p>
+					</div>
+					<div className='-mr-2 flex shrink-0 items-center'>
+						<a href={pdfUrl} target='_blank' rel='noreferrer' aria-label='Open the PDF in a new tab' title='Open in a new tab' className={iconButton}>
+							<ExternalLink className='h-5 w-5' />
+						</a>
+						<a href={pdfUrl} download aria-label='Download the PDF' title='Download' className={iconButton}>
+							<Download className='h-5 w-5' />
+						</a>
+						<button
+							type='button'
+							onClick={() => {
+								setConfirmDelete(true);
+								setDeleteError('');
+							}}
+							aria-label='Delete this paper'
+							title='Delete'
+							className={clsx(iconButton, 'hover:bg-red-50 hover:text-red-600')}
+						>
+							<Trash2 className='h-5 w-5' />
+						</button>
+						<button type='button' onClick={onClose} aria-label='Close the paper' title='Close' className={iconButton}>
+							<X className='h-5 w-5' />
+						</button>
+					</div>
+				</div>
 
+				{confirmDelete && (
+					<div role='alertdialog' aria-label='Delete this paper?' className='mx-4 mt-3 rounded-lg border border-red-200 bg-red-50 p-3 sm:mx-5'>
+						<p className='text-sm text-red-900'>
+							Delete this paper? Its PDF, summary, assessment and search index will be removed. This can’t be
+							undone.
+						</p>
+						{deleteError && (
+							<p role='alert' className='mt-1 text-sm font-medium text-red-700'>
+								{deleteError}
+							</p>
+						)}
+						<div className='mt-3 flex justify-end gap-2'>
 							<button
-								onClick={onClose}
-								className='cursor-pointer p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-all duration-200'
-								title='Close paper'
+								type='button'
+								autoFocus
+								onClick={() => setConfirmDelete(false)}
+								disabled={deleting}
+								className={buttonClasses('outline', 'sm')}
 							>
-								<X className='w-4 h-4' />
+								Cancel
 							</button>
-						</div>
-					</div>
-				</div>
-				<div className='p-4'>
-					<div className='flex items-center space-x-3'>
-						{existingSummary ? (
-							<button
-								onClick={viewSummary}
-								className='cursor-pointer flex items-center space-x-2 px-4 py-2.5 rounded-lg bg-teal-100 text-gray-700 hover:bg-gray-200 transition-all duration-200 font-medium text-sm shadow-sm'
-							>
-								<FileText className='w-4 h-4' />
-								<span>View Summary</span>
-							</button>
-						) : (
-							<button
-								onClick={() => handleAnalysis('summarize')}
-								disabled={isAnalyzing}
-								className={`flex items-center space-x-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-all duration-200 ${
-									isAnalyzing && analysisType === 'summarize'
-										? 'bg-teal-100 text-teal-700 cursor-not-allowed'
-										: 'bg-teal-500 text-white hover:bg-teal-600 hover:shadow-md shadow-sm'
-								}`}
-							>
-								{isAnalyzing && analysisType === 'summarize' ? (
-									<>
-										<div className='animate-spin rounded-full h-4 w-4 border-2 border-teal-600 border-t-transparent'></div>
-										<span>Summarizing...</span>
-									</>
+							<button type='button' onClick={handleDelete} disabled={deleting} className={buttonClasses('danger', 'sm')}>
+								{deleting ? (
+									<Loader2 className='h-4 w-4 animate-spin' aria-hidden='true' />
 								) : (
-									<>
-										<FileText className='w-4 h-4' />
-										<span>Summarize Paper</span>
-									</>
+									<Trash2 className='h-4 w-4' aria-hidden='true' />
 								)}
+								{deleting ? 'Deleting…' : 'Delete'}
 							</button>
-						)}
-						{existingAssessment ? (
-							<button
-								onClick={viewAssessment}
-								className='cursor-pointer flex items-center space-x-2 px-4 py-2.5 rounded-lg bg-gray-100 text-gray-700 hover:bg-teal-100 transition-all duration-200 font-medium text-sm shadow-sm'
-							>
-								<Star className='w-4 h-4' />
-								<span>View Assessment</span>
-							</button>
-						) : (
-							<button
-								onClick={() => handleAnalysis('assess')}
-								disabled={isAnalyzing}
-								className={`flex items-center space-x-2 px-4 py-2.5 rounded-lg font-medium text-sm transition-all duration-200 ${
-									isAnalyzing && analysisType === 'assess'
-										? 'bg-blue-100 text-blue-700 cursor-not-allowed'
-										: 'bg-blue-500 text-white hover:bg-blue-600 hover:shadow-md shadow-sm'
-								}`}
-							>
-								{isAnalyzing && analysisType === 'assess' ? (
-									<>
-										<div className='animate-spin rounded-full h-4 w-4 border-2 border-blue-600 border-t-transparent'></div>
-										<span>Assessing...</span>
-									</>
-								) : (
-									<>
-										<Star className='w-4 h-4' />
-										<span>Assess Paper</span>
-									</>
-								)}
-							</button>
-						)}
-						{isAnalyzing && (
-							<div className='flex items-center space-x-2 text-sm text-gray-500 bg-gray-50 px-3 py-2 rounded-lg'>
-								<div className='animate-pulse w-2 h-2 bg-gray-400 rounded-full'></div>
-								<span>AI Analysis in progress...</span>
-							</div>
-						)}
-					</div>
-				</div>
-			</div>
-			<div className='flex-1 relative overflow-hidden bg-white'>
-				{pdfLoading && (
-					<div className='absolute inset-0 flex items-center justify-center bg-gradient-to-br from-gray-50 to-white'>
-						<div className='text-center bg-white p-8 rounded-xl shadow-sm border border-gray-100'>
-							<div className='animate-spin rounded-full h-10 w-10 border-2 border-gray-200 border-t-teal-500 mx-auto mb-4'></div>
-							<p className='text-gray-500 font-medium'>Loading PDF...</p>
-							<p className='text-xs text-gray-400 mt-1'>Please wait a moment</p>
 						</div>
 					</div>
 				)}
-				{pdfError && (
-					<div className='absolute inset-0 flex items-center justify-center bg-gradient-to-br from-gray-50 to-white'>
-						<div className='text-center max-w-md mx-auto p-8 bg-white rounded-xl shadow-sm border border-gray-100'>
-							<div className='w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4'>
-								<FileText className='w-10 h-10 text-gray-300' />
-							</div>
-							<h3 className='text-lg font-medium text-gray-700 mb-2'>
-								Unable to load PDF
-							</h3>
-							<p className='text-gray-500 mb-6 text-sm leading-relaxed'>
-								The PDF file could not be displayed in the browser. You can
-								download it to view on your device.
-							</p>
-							<div className='flex justify-center space-x-3'>
-								<button
-									onClick={() => {
-										setPdfLoading(true);
-										setPdfError(false);
-									}}
-									className='px-5 py-2.5 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition-all duration-200 font-medium text-sm shadow-sm hover:shadow-md'
-								>
-									Try Again
-								</button>
-								<a
-									href={pdfUrl}
-									download
-									className='px-5 py-2.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-all duration-200 font-medium text-sm border border-gray-200 hover:border-gray-300'
-								>
-									Download PDF
+
+				<div className='flex flex-wrap items-center gap-2 px-4 py-3 sm:px-5'>
+					{analysisButton('summary')}
+					{analysisButton('assessment')}
+					{busy && !openModal && (
+						<p className='text-sm text-gray-500' aria-live='polite'>
+							Reading the whole paper. Long papers can take a minute.
+						</p>
+					)}
+				</div>
+				{analysisError && !openModal && (
+					<p role='alert' className='flex items-start gap-2 px-4 pb-3 text-sm text-red-600 sm:px-5'>
+						<AlertCircle className='mt-0.5 h-4 w-4 shrink-0' aria-hidden='true' />
+						{analysisError}
+					</p>
+				)}
+			</div>
+
+			<div className='relative min-h-0 flex-1 bg-gray-100'>
+				{pdfState === 'loading' && (
+					<div className='absolute inset-0 flex flex-col items-center justify-center gap-3 text-gray-500'>
+						<Loader2 className='h-8 w-8 animate-spin text-teal-600' aria-hidden='true' />
+						<p>Loading PDF…</p>
+					</div>
+				)}
+				{pdfState === 'error' && (
+					<div className='absolute inset-0 flex items-center justify-center p-6'>
+						<div className='max-w-sm text-center'>
+							<FileText className='mx-auto mb-3 h-10 w-10 text-gray-400' aria-hidden='true' />
+							<h3 className='font-medium text-gray-900'>The PDF can’t be shown here</h3>
+							<p className='mt-1 text-sm text-gray-600'>Open it in a new tab or download it instead.</p>
+							<div className='mt-4 flex justify-center gap-2'>
+								{paper.filename && (
+									<button
+										type='button'
+										onClick={() => {
+											setPdfState('loading');
+											setIframeKey((k) => k + 1);
+										}}
+										className={buttonClasses('outline', 'sm')}
+									>
+										Try again
+									</button>
+								)}
+								<a href={pdfUrl} target='_blank' rel='noreferrer' className={buttonClasses('primary', 'sm')}>
+									Open PDF
 								</a>
 							</div>
 						</div>
@@ -764,54 +551,33 @@ const PaperViewer: React.FC<PaperViewerProps> = ({ paper, onClose }) => {
 				)}
 				{paper.filename && (
 					<iframe
+						key={iframeKey}
 						src={pdfUrl}
-						title={`PDF viewer for ${paper.title}`}
-						className='w-full h-full border-0'
-						onLoad={handlePdfLoad}
-						onError={handlePdfError}
-						style={{
-							display: pdfLoading || pdfError ? 'none' : 'block',
-						}}
+						title={`PDF of ${paper.title}`}
+						onLoad={() => setPdfState('ready')}
+						onError={() => setPdfState('error')}
+						className={clsx('h-full w-full border-0', pdfState !== 'ready' && 'invisible')}
 					/>
 				)}
-				<noscript>
-					<div className='p-8 text-center bg-white'>
-						<div className='w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4'>
-							<FileText className='w-10 h-10 text-gray-300' />
-						</div>
-						<p className='text-gray-500 mb-6'>
-							Your browser doesn't support inline PDF viewing.
-						</p>
-						<a
-							href={pdfUrl}
-							target='_blank'
-							rel='noopener noreferrer'
-							className='inline-flex items-center px-6 py-3 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition-all duration-200 font-medium shadow-sm hover:shadow-md'
-						>
-							<Download className='w-4 h-4 mr-2' />
-							Download PDF
-						</a>
-					</div>
-				</noscript>
 			</div>
 
-			{/* Modals */}
 			<Modal
-				isOpen={showSummaryModal}
-				onClose={() => setShowSummaryModal(false)}
-				title='Paper Summary'
+				open={openModal === 'summary' && !!summary}
+				onClose={closeModal}
+				title='Paper summary'
+				icon={<FileText className='h-5 w-5' />}
+				footer={summary && modalFooter('summary', summaryAsText(summary))}
 			>
-				{existingSummary && <SummaryDisplay summary={existingSummary} />}
+				{summary && <SummaryView summary={summary} />}
 			</Modal>
-
 			<Modal
-				isOpen={showAssessmentModal}
-				onClose={() => setShowAssessmentModal(false)}
-				title='Paper Assessment'
+				open={openModal === 'assessment' && !!assessment}
+				onClose={closeModal}
+				title='Paper assessment'
+				icon={<ClipboardCheck className='h-5 w-5' />}
+				footer={assessment && modalFooter('assessment', assessmentAsText(assessment))}
 			>
-				{existingAssessment && (
-					<AssessmentDisplay assessment={existingAssessment} />
-				)}
+				{assessment && <AssessmentView assessment={assessment} />}
 			</Modal>
 		</div>
 	);
