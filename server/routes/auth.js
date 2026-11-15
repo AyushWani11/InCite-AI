@@ -66,8 +66,6 @@ router.post(
 				maxAge: 3 * 60 * 60 * 1000,
 			});
 
-			console.log('Token:', token);
-
 			res.status(200).json({ msg: 'User registered successfully' });
 		} catch (err) {
 			console.error('Registration error:', err);
@@ -112,8 +110,6 @@ router.post(
 				sameSite: 'None',
 				maxAge: 3 * 60 * 60 * 1000, // Cookie expires in 3 hours
 			});
-
-			console.log('Token:', token);
 
 			res.status(200).json({ msg: 'Login successful' });
 		} catch (err) {
