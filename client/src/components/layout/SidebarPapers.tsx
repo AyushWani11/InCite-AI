@@ -15,11 +15,14 @@ interface Paper {
 interface SidebarPapersProps {
 	selectedPaper: Paper | null;
 	onPaperSelect: (paper: Paper) => void;
+	// Changing this reloads the list (e.g. after an upload or a delete).
+	refreshKey?: number;
 }
 
 const SidebarPapers: React.FC<SidebarPapersProps> = ({
 	selectedPaper,
 	onPaperSelect,
+	refreshKey = 0,
 }) => {
 	const [papers, setPapers] = useState<Paper[]>([]);
 	const [loading, setLoading] = useState(false);
@@ -62,7 +65,7 @@ const SidebarPapers: React.FC<SidebarPapersProps> = ({
 		};
 
 		fetchUserPapers();
-	}, []);
+	}, [refreshKey]);
 
 	const filteredPapers = useMemo(() => {
 		return papers.filter((paper) => {
