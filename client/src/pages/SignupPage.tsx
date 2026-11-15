@@ -1,139 +1,136 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-
-import './Signup.css';
-
+import { Link, useNavigate } from 'react-router-dom';
+import AuthLayout from './AuthLayout';
+import { Button, Input } from '../components/common';
 import { API_BASE_URL as backendUrl } from '../config';
+import { messageOf, readError } from '../utils/http';
 
-// Type definitions
-interface FormData {
-	username: string;
-	email: string;
-	password: string;
-	confirmPassword: string;
+type Field = 'username' | 'email' | 'password' | 'confirmPassword';
+
+// Checked in the browser first: the server rejects these too, but some of
+// them (short username, mismatched passwords) only come back as a generic
+// "Server error".
+function validate(form: Record<Field, string>): Partial<Record<Field, string>> {
+	const errors: Partial<Record<Field, string>> = {};
+	if (form.username.trim().length < 3) errors.username = 'Use at least 3 characters.';
+	if (form.password.length < 6) errors.password = 'Use at least 6 characters.';
+	if (form.confirmPassword !== form.password) errors.confirmPassword = "Passwords don't match.";
+	return errors;
 }
 
-interface ApiResponse {
-	msg?: string;
-	// Add other expected response properties here
-}
-
-const Signup: React.FC = () => {
-	const [formData, setFormData] = useState<FormData>({
+const SignupPage: React.FC = () => {
+	const [form, setForm] = useState<Record<Field, string>>({
 		username: '',
 		email: '',
 		password: '',
 		confirmPassword: '',
 	});
-	const [error, setError] = useState<string>('');
-	const [success, setSuccess] = useState<string>('');
+	const [fieldErrors, setFieldErrors] = useState<Partial<Record<Field, string>>>({});
+	const [error, setError] = useState('');
+	const [submitting, setSubmitting] = useState(false);
 	const navigate = useNavigate();
 
-	const { username, email, password, confirmPassword } = formData;
+	const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+		setForm({ ...form, [e.target.name]: e.target.value });
+		setFieldErrors({ ...fieldErrors, [e.target.name]: undefined });
+	};
 
-	const onChange = (e: React.ChangeEvent<HTMLInputElement>): void =>
-		setFormData({ ...formData, [e.target.name]: e.target.value });
-
-	const onSubmit = async (
-		e: React.FormEvent<HTMLFormElement>
-	): Promise<void> => {
+	const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
 		e.preventDefault();
+		setError('');
+		const problems = validate(form);
+		setFieldErrors(problems);
+		if (Object.keys(problems).length) return;
 
+		setSubmitting(true);
 		try {
-			const response: Response = await fetch(backendUrl + '/auth/register', {
+			const res = await fetch(`${backendUrl}/auth/register`, {
 				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include', // Include cookies in the request
-				body: JSON.stringify(formData),
+				headers: { 'Content-Type': 'application/json' },
+				credentials: 'include',
+				body: JSON.stringify(form),
 			});
-
-			const data: ApiResponse = await response.json();
-
-			if (!response.ok) {
-				throw new Error(data.msg || 'Registration failed.');
+			if (!res.ok) {
+				const reason = await readError(res, 'Could not create your account. Please try again.');
+				throw new Error(
+					reason === 'Server error'
+						? 'Could not create your account. That username may already be taken.'
+						: reason
+				);
 			}
-
-			setSuccess('Registration successful!');
-			setError('');
-			navigate('/'); // Redirect after successful registration
+			navigate('/dashboard');
 		} catch (err) {
-			const errorMessage =
-				err instanceof Error ? err.message : 'An unknown error occurred';
-			setError(errorMessage);
-			setSuccess('');
+			setError(messageOf(err, 'Could not create your account. Please try again.'));
+		} finally {
+			setSubmitting(false);
 		}
 	};
 
 	return (
-		<div className='container'>
-			<div className='form-box login'>
-				<form onSubmit={onSubmit}>
-					<h1>Sign Up</h1>
-					{error && <div className='error-message'>{error}</div>}
-					{success && <div className='success-message'>{success}</div>}
-					<div className='input-box'>
-						<input
-							type='text'
-							name='username'
-							placeholder='Username'
-							value={username}
-							onChange={onChange}
-							required
-						/>
-						{/* <i className='bx bxs-user'></i> */}
+		<AuthLayout
+			title='Create your account'
+			subtitle='Upload papers, ask questions, and get summaries in one place.'
+			footer={
+				<>
+					Already have an account?{' '}
+					<Link to='/login' className='font-medium text-teal-700 hover:underline'>
+						Log in
+					</Link>
+				</>
+			}
+		>
+			<form onSubmit={onSubmit} noValidate className='space-y-5'>
+				{error && (
+					<div role='alert' className='rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700'>
+						{error}
 					</div>
-					<div className='input-box'>
-						<input
-							type='email'
-							name='email'
-							placeholder='Email'
-							value={email}
-							onChange={onChange}
-							required
-						/>
-						<i className='bx bxs-user'></i>
-					</div>
-					<div className='input-box'>
-						<input
-							type='password'
-							name='password'
-							placeholder='Password'
-							value={password}
-							onChange={onChange}
-							required
-						/>
-						<i className='bx bxs-lock-alt'></i>
-					</div>
-					<div className='input-box'>
-						<input
-							type='password'
-							name='confirmPassword'
-							placeholder='Confirm Password'
-							value={confirmPassword}
-							onChange={onChange}
-							required
-						/>
-						<i className='bx bxs-lock-alt'></i>
-					</div>
-
-					<button type='submit' className='btn login-btn'>
-						Sign Up
-					</button>
-				</form>
-			</div>
-			<div className='toggle-box'>
-				<div className='toggle-panel toggle-right'>
-					<h1>Welcome to InCiteAI</h1>
-					<p>Already have an account?</p>
-					<a href='/login' className='btn register-btn'>
-						Login
-					</a>
-				</div>
-			</div>
-		</div>
+				)}
+				<Input
+					label='Username'
+					name='username'
+					autoComplete='username'
+					required
+					hint='At least 3 characters.'
+					error={fieldErrors.username}
+					value={form.username}
+					onChange={onChange}
+				/>
+				<Input
+					label='Email'
+					name='email'
+					type='email'
+					autoComplete='email'
+					required
+					value={form.email}
+					onChange={onChange}
+				/>
+				<Input
+					label='Password'
+					name='password'
+					type='password'
+					autoComplete='new-password'
+					required
+					hint='At least 6 characters.'
+					error={fieldErrors.password}
+					value={form.password}
+					onChange={onChange}
+				/>
+				<Input
+					label='Confirm password'
+					name='confirmPassword'
+					type='password'
+					autoComplete='new-password'
+					required
+					error={fieldErrors.confirmPassword}
+					value={form.confirmPassword}
+					onChange={onChange}
+				/>
+				<Button type='submit' className='w-full' disabled={submitting}>
+					{submitting ? 'Creating account…' : 'Create account'}
+				</Button>
+			</form>
+		</AuthLayout>
 	);
 };
 
-export default Signup;
+export default SignupPage;
