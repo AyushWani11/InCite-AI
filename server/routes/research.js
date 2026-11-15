@@ -6,6 +6,7 @@ const { Readable } = require('stream');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const authLogin = require('../middleware/authToken');
 const Paper = require('../models/paper');
+const { findOwnedPaper } = require('../utils/papers');
 const { addPaperChunks } = require('../utils/vectorStore');
 const { deleteVectorsByUser } = require('../utils/vectorStore');
 const { deleteVectorsByPaper } = require('../utils/vectorStore');
@@ -139,8 +140,9 @@ ${text.substring(0, 6000)}
 
 // Search papers
 router.get('/search', authLogin, async (req, res) => {
-	const { title, author, keyword, fromDate, toDate, uploadedBy } = req.query;
-	const query = {};
+	const { title, author, keyword, fromDate, toDate } = req.query;
+	// Always limited to the caller's own papers.
+	const query = { uploadedBy: req.user.id };
 
 	if (title) query.title = { $regex: title, $options: 'i' };
 	if (author) query.authors = { $elemMatch: { $regex: author, $options: 'i' } };
@@ -150,7 +152,6 @@ router.get('/search', authLogin, async (req, res) => {
 		if (fromDate) query.publicationDate.$gte = new Date(fromDate);
 		if (toDate) query.publicationDate.$lte = new Date(toDate);
 	}
-	if (uploadedBy) query.uploadedBy = uploadedBy;
 
 	try {
 		const papers = await Paper.find(query).sort({ createdAt: -1 });
@@ -197,7 +198,7 @@ ${text.substring(0, 7000)}
 
 router.post('/summarize/:paperId', authLogin, async (req, res) => {
 	try {
-		const paper = await Paper.findById(req.params.paperId);
+		const paper = await findOwnedPaper(req.params.paperId, req.user.id);
 		if (!paper) return res.status(404).json({ error: 'Paper not found' });
 
 		const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
@@ -240,7 +241,7 @@ router.post('/summarize/:paperId', authLogin, async (req, res) => {
 
 router.get('/summary/:paperId', authLogin, async (req, res) => {
 	try {
-		const paper = await Paper.findById(req.params.paperId);
+		const paper = await findOwnedPaper(req.params.paperId, req.user.id);
 		if (!paper?.summary)
 			return res.status(404).json({ error: 'Summary not found' });
 		res.status(200).json({ summary: paper.summary });
@@ -286,7 +287,7 @@ router.delete('/delete-all', authLogin, async (req, res) => {
 
 router.delete('/delete/:id', authLogin, async (req, res) => {
 	try {
-		const paper = await Paper.findById(req.params.id);
+		const paper = await findOwnedPaper(req.params.id, req.user.id);
 		if (!paper) return res.status(404).json({ error: 'Paper not found' });
 
 		const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
@@ -298,7 +299,7 @@ router.delete('/delete/:id', authLogin, async (req, res) => {
 			.toArray();
 
 		for (const file of files) await bucket.delete(file._id);
-		await Paper.findByIdAndDelete(req.params.id);
+		await paper.deleteOne();
 
 		// await deleteVectorsByPaper(
 		// 	paper._id.toString(),
@@ -321,7 +322,7 @@ router.delete('/delete/:id', authLogin, async (req, res) => {
 
 router.post('/assess/:paperId', authLogin, async (req, res) => {
 	try {
-		const paper = await Paper.findById(req.params.paperId);
+		const paper = await findOwnedPaper(req.params.paperId, req.user.id);
 		if (!paper) return res.status(404).json({ error: 'Paper not found' });
 
 		const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
@@ -398,7 +399,7 @@ ${text.substring(0, 10000)}
 
 router.get('/assessment/:paperId', authLogin, async (req, res) => {
 	try {
-		const paper = await Paper.findById(req.params.paperId);
+		const paper = await findOwnedPaper(req.params.paperId, req.user.id);
 		if (!paper?.assessment)
 			return res.status(404).json({ error: 'Assessment not found' });
 		res.status(200).json({ assessment: paper.assessment });
