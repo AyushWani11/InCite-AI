@@ -34,6 +34,61 @@ test('register sets an httpOnly login cookie that check-login accepts', async ()
 	assert.equal(me.body.user.username, 'alice');
 });
 
+// The Set-Cookie header for the login token with its value redacted, e.g.
+// "token=<redacted>; Max-Age=10800; Path=/; HttpOnly; SameSite=Lax".
+const tokenCookie = (res) =>
+	(res.headers.getSetCookie().find((c) => c.startsWith('token=')) || '').replace(
+		/^token=[^;]+/,
+		'token=<redacted>'
+	);
+
+async function loginAs(email) {
+	const client = makeClient(app.base);
+	const res = await client.post('/api/auth/login', {
+		json: { email, password: 'password123' },
+	});
+	return { client, res };
+}
+
+test('in local dev the login cookie works over plain http (Lax, not Secure)', async () => {
+	await registerUser(app.base, 'devcookie');
+	const { res } = await loginAs('devcookie@example.com');
+	const cookie = tokenCookie(res);
+
+	// Browsers reject SameSite=None without Secure, and Secure needs https,
+	// so either of these would stop login from working on http://localhost.
+	assert.match(cookie, /SameSite=Lax/i, cookie);
+	assert.doesNotMatch(cookie, /;\s*Secure/i, cookie);
+});
+
+test('in production the login cookie is SameSite=None; Secure (cross-site)', async () => {
+	await registerUser(app.base, 'prodcookie');
+	const previous = process.env.NODE_ENV;
+	process.env.NODE_ENV = 'production';
+	try {
+		const { res } = await loginAs('prodcookie@example.com');
+		const cookie = tokenCookie(res);
+		assert.match(cookie, /SameSite=None/i, cookie);
+		assert.match(cookie, /;\s*Secure/i, cookie);
+		assert.match(cookie, /HttpOnly/i, cookie);
+	} finally {
+		if (previous === undefined) delete process.env.NODE_ENV;
+		else process.env.NODE_ENV = previous;
+	}
+});
+
+test('logout clears the cookie with the same attributes it was set with', async () => {
+	await registerUser(app.base, 'logoutuser');
+	const { client } = await loginAs('logoutuser@example.com');
+	const res = await client.post('/api/auth/logout');
+	assert.equal(res.status, 200);
+
+	const cookie = tokenCookie(res);
+	assert.match(cookie, /Expires=Thu, 01 Jan 1970/i, cookie);
+	assert.match(cookie, /SameSite=Lax/i, cookie);
+	assert.doesNotMatch(cookie, /;\s*Secure/i, cookie);
+});
+
 test('requests without a login cookie get 401', async () => {
 	const anon = makeClient(app.base);
 	const res = await anon.get('/api/auth/check-login');
