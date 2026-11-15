@@ -19,7 +19,7 @@
     "jsonwebtoken": "^9.0.2",
     "marked": "^14.1.2",
     "mongoose": "^8.7.0",
-    "multer": "^1.4.2",
+    "multer": "^2.5.0",
     "node-fetch": "^3.3.2",
     "nodemon": "^3.1.7",
     "openai": "^4.63.0",

@@ -22,7 +22,12 @@ const {
 require('dotenv').config();
 
 const router = express.Router();
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({
+	storage: multer.memoryStorage(),
+	// Browsers send filenames as UTF-8; multer 2 assumes latin1 by default,
+	// which garbles names like "résumé.pdf".
+	defParamCharset: 'utf8',
+});
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });

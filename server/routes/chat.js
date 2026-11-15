@@ -10,7 +10,8 @@ const { findUserFileByName, readFile } = require('../utils/papers');
 require('dotenv').config();
 
 const router = express.Router();
-const upload = multer({ dest: 'uploads/' });
+// defParamCharset: browsers send filenames as UTF-8; multer 2 assumes latin1.
+const upload = multer({ dest: 'uploads/', defParamCharset: 'utf8' });
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
