@@ -25,6 +25,7 @@ const state = {
 		namespaces: new Map(), // namespace -> Map(id -> record)
 		queries: [],
 		deletes: [],
+		deleteFails: false, // simulate Pinecone being unavailable for deletes
 	},
 };
 
@@ -38,6 +39,7 @@ function reset() {
 	state.pinecone.namespaces = new Map();
 	state.pinecone.queries = [];
 	state.pinecone.deletes = [];
+	state.pinecone.deleteFails = false;
 }
 reset();
 
@@ -183,6 +185,9 @@ function fakeNamespace(nsName) {
 		// IS the metadata filter.
 		async deleteMany(options) {
 			state.pinecone.deletes.push({ namespace: nsName, options });
+			if (state.pinecone.deleteFails) {
+				throw new Error('[fake pinecone] service unavailable');
+			}
 			const store = namespaceStore(nsName);
 			for (const [id, r] of store) {
 				const hit = Array.isArray(options)

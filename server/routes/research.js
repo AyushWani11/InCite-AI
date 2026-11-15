@@ -13,9 +13,11 @@ const {
 	readPaperFile,
 	deletePaperFile,
 } = require('../utils/papers');
-const { addPaperChunks } = require('../utils/vectorStore');
-const { deleteVectorsByUser } = require('../utils/vectorStore');
-const { deleteVectorsByPaper } = require('../utils/vectorStore');
+const {
+	addPaperChunks,
+	deleteVectorsByUser,
+	deleteVectorsByPaper,
+} = require('../utils/vectorStore');
 
 require('dotenv').config();
 
@@ -264,6 +266,10 @@ router.delete('/delete-all', authLogin, async (req, res) => {
 
 		const papers = await Paper.find({ uploadedBy: userId });
 
+		// Searchable chunks first: if this fails, nothing else has been
+		// deleted yet and the user can simply retry.
+		await deleteVectorsByUser(userId);
+
 		// Delete each paper's own stored file (never by filename alone, which
 		// other users may share).
 		for (const paper of papers) {
@@ -271,8 +277,6 @@ router.delete('/delete-all', authLogin, async (req, res) => {
 		}
 
 		await Paper.deleteMany({ uploadedBy: userId });
-
-		await deleteVectorsByUser(userId);
 
 		res.status(200).json({ msg: 'All your papers have been deleted' });
 	} catch (err) {
@@ -286,25 +290,17 @@ router.delete('/delete/:id', authLogin, async (req, res) => {
 		const paper = await findOwnedPaper(req.params.id, req.user.id);
 		if (!paper) return res.status(404).json({ error: 'Paper not found' });
 
+		// Searchable chunks first: if this fails, the paper is untouched and
+		// the user can retry, instead of a "deleted" paper that chat can
+		// still quote.
+		await deleteVectorsByPaper(paper._id, paper.uploadedBy);
 		await deletePaperFile(paper);
 		await paper.deleteOne();
 
-		// await deleteVectorsByPaper(
-		// 	paper._id.toString(),
-		// 	paper.uploadedBy.toString()
-		// );
-
 		res.status(200).json({ msg: 'Paper deleted' });
-
-		deleteVectorsByPaper(
-			paper._id.toString(),
-			paper.uploadedBy.toString()
-		).catch((err) => console.error('❌ Vector deletion failed:', err));
 	} catch (err) {
-		console.error('❌ Delete route failed:', err);
-		if (!res.headersSent) {
-			res.status(500).json({ error: 'Deletion failed' });
-		}
+		console.error('Delete route failed:', err);
+		res.status(500).json({ error: 'Deletion failed' });
 	}
 });
 

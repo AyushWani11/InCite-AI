@@ -121,37 +121,28 @@ async function searchRelevantChunks(
 	}));
 }
 
-async function deleteVectorsByUser(userId) {
-	const index = pc.index(indexName);
-	const ns = index.namespace(namespaceName);
+// Note: the Pinecone JS SDK takes the metadata filter itself as the argument
+// to deleteMany. Wrapping it as { filter: ... } (the Python/REST shape) would
+// filter on a metadata field literally called "filter" and delete nothing.
 
-	try {
-		await ns.deleteMany({
-			filter: { userId },
-		});
-		console.log(`All vectors deleted for user ${userId}`);
-	} catch (err) {
-		console.error('Failed to delete vectors by userId:', err);
-		throw err;
-	}
+async function deleteVectorsByUser(userId) {
+	const ns = pc.index(indexName).namespace(namespaceName);
+	await ns.deleteMany({ userId: { $eq: String(userId) } });
+	console.log(`All vectors deleted for user ${userId}`);
 }
 
-async function deleteVectorsByPaper(paperId, userId = null) {
-	const index = pc.index(indexName);
-	const ns = index.namespace(namespaceName);
-
-	const filter = userId ? { paperId, userId } : { paperId };
-
-	try {
-		await ns.deleteMany({ filter });
-		console.log(`Vectors deleted for paper ${paperId}`);
-	} catch (err) {
-		console.error('Failed to delete vectors by paperId:', err);
-		throw err;
-	}
+async function deleteVectorsByPaper(paperId, userId) {
+	const ns = pc.index(indexName).namespace(namespaceName);
+	await ns.deleteMany({
+		paperId: { $eq: String(paperId) },
+		userId: { $eq: String(userId) },
+	});
+	console.log(`Vectors deleted for paper ${paperId}`);
 }
 
 module.exports = {
 	addPaperChunks,
 	searchRelevantChunks,
+	deleteVectorsByUser,
+	deleteVectorsByPaper,
 };
