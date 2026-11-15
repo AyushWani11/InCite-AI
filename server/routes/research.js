@@ -3,7 +3,12 @@ const multer = require('multer');
 const { parsePdf } = require('../utils/pdf');
 const mongoose = require('mongoose');
 const { Readable } = require('stream');
-const { generateText } = require('../utils/llm');
+const { generateStructured, StructuredOutputError } = require('../utils/structured');
+const {
+	SUMMARY_SCHEMA,
+	ASSESSMENT_SCHEMA,
+	METADATA_SCHEMA,
+} = require('../utils/schemas');
 const authLogin = require('../middleware/authToken');
 const Paper = require('../models/paper');
 const {
@@ -29,6 +34,44 @@ const upload = multer({
 	defParamCharset: 'utf8',
 });
 
+// The prompts describe the task; the field-by-field format comes from the
+// JSON schemas in utils/schemas.js, which Gemini is made to follow.
+const buildMetadataPrompt = (text) => `
+You are an academic assistant. From the research paper text below, extract
+the author names and 5 to 10 keywords that summarise the paper.
+
+Text:
+${text.substring(0, 6000)}
+`;
+
+const buildSummaryPrompt = (text) => `
+You are an expert academic summarizer. Write a structured summary of the
+research paper below that captures both depth and clarity.
+
+Text:
+${text.substring(0, 7000)}
+`;
+
+const buildAssessmentPrompt = (text) => `
+You are an academic research paper reviewer who focuses on content. Assume
+none of the figures are missing. Rate the writing quality, methodology and
+academic standards, give feedback on each, list actionable improvement
+suggestions and any issues (citation gaps, statistical problems, ...), and
+describe the paper's X-factor. The overall score (0-100) should be a fair
+reflection of the three ratings.
+
+Text:
+${text.substring(0, 10000)}
+`;
+
+// A reply from Gemini we could not use even after one retry: answer 502
+// ("bad gateway": the upstream service misbehaved) with a helpful message.
+function sendUnusableAiReply(res, what, err) {
+	return res.status(502).json({
+		error: `The AI returned a ${what} we could not use, even after retrying. Please try again in a moment.`,
+		details: err.problem,
+	});
+}
 
 // Helper
 function isValidDate(date) {
@@ -61,30 +104,17 @@ router.post(
 
 				const metadata = parsed.info || {};
 
-				// ✨ ML extraction
+				// Authors and keywords from Gemini. Optional: if this fails, the
+				// upload still succeeds using the PDF's own metadata below.
 				let mlData = { authors: [], keywords: [] };
 				try {
-					let prompt = `
-You are an academic assistant. From the following research paper text, extract:
-1. A list of author names.
-2. A list of 5–10 keywords summarizing the paper.
-
-Respond ONLY in JSON format:
-{
-  "authors": [...],
-  "keywords": [...]
-}
-
-Text:
-${text.substring(0, 6000)}
-				`;
-
-					let jsonText = (await generateText(prompt)).trim();
-					if (jsonText.startsWith('```'))
-						jsonText = jsonText.replace(/```json|```/g, '').trim();
-					mlData = JSON.parse(jsonText);
+					mlData = await generateStructured({
+						prompt: buildMetadataPrompt(text),
+						schema: METADATA_SCHEMA,
+						label: 'authors/keywords',
+					});
 				} catch (err) {
-					console.warn('Gemini ML extraction failed:', err);
+					console.warn('Author/keyword extraction failed, using PDF metadata:', err.message);
 				}
 
 				const authors =
@@ -199,22 +229,6 @@ router.get('/download/:paperId', authLogin, async (req, res) => {
 	}
 });
 
-const buildSummaryPrompt = (text) => `
-You are an expert academic summarizer. Given a research paper, generate a structured JSON summary that captures both depth and clarity.
-
-Return exactly this JSON format:
-{
-  "summary": "Concise, well-written abstract of the paper.",
-  "contributions": ["Each point must describe a novel or impactful contribution clearly."],
-  "methodology": "Explain in detail the techniques, models, or frameworks used. Include dataset, architecture, or mathematical tools if relevant.",
-  "findings": "List the concrete results. Include comparisons, metrics, or evidence supporting the claims.",
-  "conclusion": "Summarize the takeaway of the paper and what future work it enables."
-}
-
-Text:
-${text.substring(0, 7000)}
-`;
-
 router.post('/summarize/:paperId', authLogin, async (req, res) => {
 	try {
 		const paper = await findOwnedPaper(req.params.paperId, req.user.id);
@@ -226,16 +240,13 @@ router.post('/summarize/:paperId', authLogin, async (req, res) => {
 		}
 
 		const fullText = (await parsePdf(pdfBuffer)).text;
-		const prompt = buildSummaryPrompt(fullText);
 
-		let jsonText = (await generateText(prompt)).trim();
-
-		// remove markdown code fences
-		if (jsonText.startsWith('```')) {
-			jsonText = jsonText.replace(/```json|```/g, '').trim();
-		}
-
-		const summary = JSON.parse(jsonText);
+		// Only a reply that passes the schema check is saved.
+		const summary = await generateStructured({
+			prompt: buildSummaryPrompt(fullText),
+			schema: SUMMARY_SCHEMA,
+			label: 'summary',
+		});
 		paper.summary = summary;
 		await paper.save();
 
@@ -244,6 +255,7 @@ router.post('/summarize/:paperId', authLogin, async (req, res) => {
 			summary,
 		});
 	} catch (err) {
+		if (err instanceof StructuredOutputError) return sendUnusableAiReply(res, 'summary', err);
 		console.error('Summarization failed:', err);
 		res.status(500).json({ error: 'Summarization failed' });
 	}
@@ -317,57 +329,19 @@ router.post('/assess/:paperId', authLogin, async (req, res) => {
 
 		const text = (await parsePdf(pdfBuffer)).text;
 
-		const prompt = `
-You are an academic reasearch paper reviewer who focuses more on content. assume none of the figures are missing.
-
-Analyze the following research paper and return a JSON object with the following structure:
-
-{
-  "score": {
-    "writingQuality": "Excellent | Good | Average | Poor",
-    "methodology": "Excellent | Good | Average | Poor",
-    "academicStandards": "Excellent | Good | Average | Poor",
-    "overallScore": 0 // integer from 0 to 100
-  },
-  "feedback": {
-    "writing": "Comments on clarity, grammar, organization, tone.",
-    "methodology": "Comments on methods, experiments, limitations.",
-    "standards": "Comments on formatting, citations, references, compliance."
-  },
-  "improvementSuggestions": [
-    "Specific, actionable recommendation 1",
-    "Specific, actionable recommendation 2"
-  ],
-  "issues": [
-    "Flag citation gaps, statistical problems, etc."
-  ]
-  "X-Factor": "Unique insights, creativity, or impact of the research." 
-}
-
-Be sure the overallScore is between 0 and 100 and reflects a fair average based on the 3 category scores.
-
-Text:
-${text.substring(0, 10000)}
-`;
-
-		let responseText = (await generateText(prompt)).trim();
-
-		if (responseText.startsWith('```')) {
-			responseText = responseText.replace(/```json|```/g, '').trim();
-		}
-
-		let assessment;
-		try {
-			assessment = JSON.parse(responseText);
-			paper.assessment = assessment;
-			await paper.save();
-		} catch (e) {
-			console.warn('Gemini returned malformed JSON:', responseText);
-			return res.status(500).json({ error: 'Failed to parse Gemini response' });
-		}
+		// Only a reply that passes the schema check is saved (the client
+		// crashes on an assessment without e.g. score.overallScore).
+		const assessment = await generateStructured({
+			prompt: buildAssessmentPrompt(text),
+			schema: ASSESSMENT_SCHEMA,
+			label: 'assessment',
+		});
+		paper.assessment = assessment;
+		await paper.save();
 
 		res.status(200).json({ assessment });
 	} catch (err) {
+		if (err instanceof StructuredOutputError) return sendUnusableAiReply(res, 'assessment', err);
 		console.error('Assessment error:', err);
 		res.status(500).json({ error: 'Assessment failed' });
 	}

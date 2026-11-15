@@ -568,7 +568,11 @@ const PaperViewer: React.FC<PaperViewerProps> = ({ paper, onClose }) => {
 			});
 
 			if (!response.ok) {
-				throw new Error(`Analysis failed: ${response.statusText}`);
+				// The server explains what went wrong (e.g. a 502 when the AI's
+				// reply was unusable even after a retry); show that message.
+				const body = await response.json().catch(() => ({}));
+				alert(body.error || `Failed to ${type} paper. Please try again.`);
+				return;
 			}
 
 			const result = await response.json();
@@ -580,7 +584,8 @@ const PaperViewer: React.FC<PaperViewerProps> = ({ paper, onClose }) => {
 				setExistingAssessment(result.assessment);
 				setShowAssessmentModal(true);
 			}
-		} catch (error) {
+		} catch {
+			// Network error: the server could not be reached at all.
 			alert(`Failed to ${type} paper. Please try again.`);
 		} finally {
 			setIsAnalyzing(false);

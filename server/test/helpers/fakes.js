@@ -46,7 +46,11 @@ const DEFAULT_INDEX_CONFIG = {
 function reset() {
 	state.gemini.calls = [];
 	state.gemini.chats = [];
-	state.gemini.generate = () => '{}';
+	// Like real JSON mode: if a schema was requested, reply with valid JSON.
+	state.gemini.generate = ({ request }) => {
+		const schema = request?.config?.responseJsonSchema;
+		return schema ? JSON.stringify(sampleFromSchema(schema)) : 'fake reply';
+	};
 	state.gemini.chatReply = () => 'fake answer';
 	state.pinecone.namespaces = new Map();
 	state.pinecone.queries = [];
@@ -77,6 +81,28 @@ function fakeEmbed(text) {
 	}
 	const norm = Math.sqrt(v.reduce((s, x) => s + x * x, 0)) || 1;
 	return v.map((x) => x / norm);
+}
+
+// A small value that satisfies a JSON Schema (the subset our schemas use).
+function sampleFromSchema(schema) {
+	if (schema.enum) return schema.enum[0];
+	switch (schema.type) {
+		case 'object':
+			return Object.fromEntries(
+				Object.entries(schema.properties || {}).map(([k, sub]) => [k, sampleFromSchema(sub)])
+			);
+		case 'array':
+			return Array.from({ length: Math.max(1, schema.minItems || 0) }, () =>
+				sampleFromSchema(schema.items || { type: 'string' })
+			);
+		case 'integer':
+		case 'number':
+			return schema.minimum ?? 1;
+		case 'boolean':
+			return true;
+		default:
+			return 'sample text';
+	}
 }
 
 // The text of a `contents` value: a string, a turn, or a list of either.
@@ -317,4 +343,4 @@ function install(name, overrides) {
 install('@google/genai', { GoogleGenAI: FakeGoogleGenAI });
 install('@pinecone-database/pinecone', { Pinecone: FakePinecone });
 
-module.exports = { state, reset, fakeEmbed, DIM };
+module.exports = { state, reset, fakeEmbed, sampleFromSchema, DIM };

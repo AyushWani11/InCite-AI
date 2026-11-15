@@ -7,13 +7,7 @@ const { startApp, registerUser, uploadPdf } = require('./helpers/harness');
 const Paper = require('../models/paper');
 const { makePdf } = require('./helpers/pdf');
 
-const GOOD_JSON = JSON.stringify({
-	summary: 's', contributions: [], methodology: 'm', findings: 'f', conclusion: 'c',
-	score: { writingQuality: 'Good', methodology: 'Good', academicStandards: 'Good', overallScore: 70 },
-	feedback: { writing: 'w', methodology: 'm', standards: 's' },
-	improvementSuggestions: [], issues: [], 'X-Factor': 'x',
-});
-
+// Gemini's replies come from the fake's schema-aware default (valid JSON).
 let app;
 const pdfSaying = (word) =>
 	makePdf({ pages: [[`${word} is the secret word of this paper.`, `More about ${word}.`]] });
@@ -38,7 +32,6 @@ async function chat(user, paperId) {
 
 before(async () => {
 	app = await startApp();
-	app.fakes.state.gemini.generate = () => GOOD_JSON;
 });
 after(() => app.stop());
 

@@ -6,9 +6,6 @@ const { startApp, registerUser, uploadPdf } = require('./helpers/harness');
 const { makePdf } = require('./helpers/pdf');
 
 const ATTEMPTS = 10;
-const GOOD_JSON = JSON.stringify({
-	summary: 's', contributions: [], methodology: 'm', findings: 'f', conclusion: 'c',
-});
 
 let app, user;
 
@@ -17,7 +14,6 @@ const tinyPdf = (i) =>
 
 before(async () => {
 	app = await startApp();
-	app.fakes.state.gemini.generate = () => GOOD_JSON;
 	user = await registerUser(app.base, 'smallpdf');
 });
 after(() => app.stop());
