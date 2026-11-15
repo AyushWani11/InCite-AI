@@ -49,7 +49,10 @@ paper and passages they used.
   Paper | Chat tabs (switching tabs keeps the conversation).
 - The dashboard is only for logged-in users; uploads and deletes update the
   list in place and report the result in a notification.
-- Answers are markdown, sanitised with DOMPurify before they are shown.
+- Answers, summaries and assessments are markdown with LaTeX math (rendered
+  with KaTeX), sanitised with DOMPurify before they are shown. Images are
+  not allowed in model output, so a malicious PDF can't make the browser
+  send the conversation to another server.
 - Summaries and assessments open in a pop-up and can be regenerated or copied
   as text.
 - Voice input and reading answers aloud, in browsers that support the Web
@@ -109,7 +112,7 @@ When no paper is selected:
 | Layer | Technology |
 | --- | --- |
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS (+ typography plugin), lucide icons |
-| Answer rendering | `marked` (markdown to HTML) + `DOMPurify` (sanitising) |
+| Answer rendering | `marked` (markdown to HTML) + `KaTeX` (math) + `DOMPurify` (sanitising) |
 | Backend | Node.js 22+, Express 4 |
 | Text generation | Google Gemini (`gemini-3.6-flash` by default) via `@google/genai` |
 | Embeddings and vector search | Pinecone serverless index with integrated embedding (`llama-text-embed-v2`) |
@@ -220,8 +223,13 @@ All routes except register/login/logout need the login cookie.
 - **Server (e.g. Render):** set the required variables above plus
   `NODE_ENV=production` and `FRONTEND_URL`. `package.json` declares Node 22+.
   The port is 5000.
-- **Client (e.g. Vercel):** production builds call the deployed API URL in
-  `client/src/config.ts`; override it with `VITE_API_BASE_URL` at build time.
+- **Client (e.g. Vercel):** the app always calls `/api` on its own domain.
+  `client/vercel.json` forwards `/api/*` to the API on Render (change the
+  destination there if the API moves) and turns off Vercel's caching for it.
+  Calling Render directly made the login cookie a third-party cookie, which
+  Safari on iPhone and other browsers block, so logging in looped back to the
+  login page. `VITE_API_BASE_URL` still overrides the API location at build
+  time. Vercel waits at most 120 seconds for the API.
 - After changing the embedding model, create a new Pinecone index with the new
   model, point `PINECONE_INDEX_NAME` at it, change `PINECONE_NAMESPACE_PREFIX`,
   and run `npm run reindex`. Vectors from different embedding models cannot be

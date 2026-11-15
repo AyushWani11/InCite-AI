@@ -24,6 +24,13 @@ html {
 	scrollbar-color: #d1d5db transparent;
 }
 
+/* Long formulas (KaTeX, see utils/markdown.ts) scroll sideways instead of
+   overflowing their chat bubble or card. */
+.math-display {
+	overflow-x: auto;
+	overflow-y: hidden;
+}
+
 /* Respect the "reduce motion" system setting. */
 @media (prefers-reduced-motion: reduce) {
 	html {

