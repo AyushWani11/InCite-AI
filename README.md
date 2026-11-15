@@ -14,9 +14,10 @@ paper and passages they used.
 - The upload reports each file honestly: `201` all stored, `207` some stored,
   `422` all unreadable, `502` a backing service failed (with a per-file list).
   A file that fails half-way is removed completely, never left half-indexed.
-- View, download, search (title, author, keyword, date) and delete your own
-  papers. Every route checks that the paper belongs to the logged-in user and
-  answers `404` otherwise.
+- View, download, search and delete your own papers (the API searches title,
+  author, keyword and date; the paper list in the app filters by title,
+  author and file name). Every route checks that the paper belongs to the
+  logged-in user and answers `404` otherwise.
 
 ### Chat ("ask your papers")
 - **With a paper selected**, the client sends the paper's MongoDB `_id`.
@@ -42,6 +43,20 @@ paper and passages they used.
   no empty sections), and retried once. If it is still unusable the API
   answers `502` with an explanation, and nothing is saved.
 - Results are saved and can be fetched again later.
+
+### The app
+- Works on phones: the paper list becomes a drawer, and an open paper gets
+  Paper | Chat tabs (switching tabs keeps the conversation).
+- The dashboard is only for logged-in users; uploads and deletes update the
+  list in place and report the result in a notification.
+- Answers are markdown, sanitised with DOMPurify before they are shown.
+- Summaries and assessments open in a pop-up and can be regenerated or copied
+  as text.
+- Voice input and reading answers aloud, in browsers that support the Web
+  Speech API.
+- Keyboard and screen-reader friendly: labelled controls, pop-ups that trap
+  focus and close on Escape, and a paper/chat divider you can resize with the
+  arrow keys.
 
 ## How it works
 
@@ -93,7 +108,8 @@ When no paper is selected:
 
 | Layer | Technology |
 | --- | --- |
-| Frontend | React 19, TypeScript, Vite, Tailwind CSS |
+| Frontend | React 19, TypeScript, Vite, Tailwind CSS (+ typography plugin), lucide icons |
+| Answer rendering | `marked` (markdown to HTML) + `DOMPurify` (sanitising) |
 | Backend | Node.js 22+, Express 4 |
 | Text generation | Google Gemini (`gemini-3.6-flash` by default) via `@google/genai` |
 | Embeddings and vector search | Pinecone serverless index with integrated embedding (`llama-text-embed-v2`) |
@@ -221,10 +237,6 @@ Being honest about what this does not do (yet):
 - **Saving chat history does not work.** The client sends JSON, but the server
   route expects a `text/plain` body, and the message roles do not match the
   database schema. Chat history is kept in the browser only.
-- **Model output is rendered as HTML without sanitising** (`marked` +
-  `dangerouslySetInnerHTML`). Text in a malicious PDF could make the model
-  output HTML that runs in the reader's browser. The login cookie is
-  `httpOnly`, which limits the damage, but this should be sanitised.
 - **No upload size limit** beyond 10 files per request; files are held in
   memory while processed.
 - **Search** builds regular expressions from user input (a malformed pattern
@@ -239,8 +251,8 @@ Being honest about what this does not do (yet):
   (no OCR); the API says so instead of inventing content. `pdf-parse` bundles
   an old pdf.js (2017).
 - **Duplicate uploads** are not detected.
-- **The chat UI displays answers 20 ms per character**, so long answers take a
-  while to appear even after the server has finished.
+- **No automated browser tests.** The server has a test suite; the UI was
+  checked by hand and with a local Puppeteer script that is not in the repo.
 - **Embedding model is tied to the Pinecone index:** changing it means a new
   index and a re-index (see Deployment notes).
 - **Dependencies:** several unused packages remain in `server/package.json`

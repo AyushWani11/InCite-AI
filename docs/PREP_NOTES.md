@@ -30,6 +30,10 @@ map-reduce, how many excerpts to retrieve) on real data instead of guessing.
   for about 2% of that.
 - Chunk overlap costs ~20% more chunks.
 - Test suite: 110 tests, no API keys needed.
+- Chat display: a demo answer took **10 s** to appear after the server had
+  sent it (20 ms per character); now **0.1 s**.
+- Button contrast: white on teal-500 **2.5:1** (fails WCAG's 4.5:1); teal-700
+  **5.5:1**.
 
 ---
 
@@ -327,12 +331,101 @@ map-reduce, how many excerpts to retrieve) on real data instead of guessing.
 
 ---
 
+## Phase 7: the frontend
+
+How I checked it: `npm run build`, ESLint (4 errors before, 0 after), and a
+throwaway Puppeteer script run against the real Express app with an in-memory
+MongoDB and fake AI services. It took screenshots at 1440 px and 390 px
+(phone) width, checked for sideways scrolling, and clicked through upload,
+chat, summary, assessment, delete and logout.
+
+### 26. The home page claimed features that don't exist
+- **What was wrong:** it advertised DOC and plain-text uploads, OCR, drag and
+  drop, citation management, collaboration, exports, a "knowledge graph",
+  "Live" analytics (1,247 papers processed) and a semantic-search demo with
+  invented "98% match" results.
+- **In 30 seconds:** "I rewrote it to list only what the app does, and checked
+  each claim against the code: the 10-file upload limit, the actual summary
+  and assessment fields, even the server's exact 'not found' reply, which the
+  page shows as an example. I added two honest notes: scanned PDFs can't be
+  read, and voice only works in some browsers."
+- **Follow-up:** *Why bother for a student project?* Anyone who tries the app
+  finds out in a minute, and a page that overclaims makes them doubt the parts
+  that are real.
+
+### 27. It didn't work on phones
+- **What was wrong:** the login card was a fixed 850 px wide. The login
+  page's CSS set styles on `body`, `form`, `a`, `.container` and `.btn`, and
+  because Vite bundles every imported CSS file globally, those styles leaked
+  into every page. The dashboard's fixed sidebar and split view didn't fit a
+  phone, and the mobile menu was broken.
+- **In 30 seconds:** "I rebuilt the login and sign-up pages in Tailwind and
+  deleted the leaking CSS. On a phone the paper list is a slide-in drawer and
+  an open paper gets Paper | Chat tabs. Both panels stay mounted and are only
+  hidden with CSS, so switching tabs doesn't lose the conversation."
+- **Follow-up:** *Why not render only the active tab?* Unmounting the chat
+  would throw away its state: the messages, the draft and an answer still
+  streaming in. Hiding it costs one hidden iframe.
+
+### 28. Chat: 20 ms per character, and unsanitised HTML
+- **What was wrong:** the client replayed each streamed character on a 20 ms
+  timer, so a 500-character answer took 10 extra seconds to appear. The
+  model's markdown went through `marked` into `dangerouslySetInnerHTML`
+  without sanitising.
+- **In 30 seconds:** "Chunks are now shown as they arrive: in the demo the
+  answer finishes in 0.1 s instead of 10 s. Markdown is converted with
+  `marked`, cleaned with DOMPurify, and styled with Tailwind's typography
+  plugin. The user's own messages are shown as plain text."
+- **Follow-up:** *Why sanitise if the cookie is httpOnly?* httpOnly stops a
+  script from reading the token, but an injected script can still send
+  requests as the user from their own browser, e.g. delete their papers. A
+  malicious PDF can steer the model into writing an `<img onerror=...>` tag.
+  Sanitising removes it.
+
+### 29. Dashboard: login check, no reloads, no alert()
+- **What was wrong:** logged-out visitors saw a broken dashboard. Uploads and
+  deletes reloaded the whole page, errors used `alert()` and `confirm()`, and
+  the welcome text was fixed on first load, so after selecting a paper it
+  still said "Attach a paper to get started".
+- **In 30 seconds:** "The dashboard checks the session once and redirects to
+  login on a 401. Uploads and deletes bump a `refreshKey` prop that makes the
+  paper list refetch, and results show in a small notification or inline.
+  Delete asks for confirmation inline and says what will be removed."
+- **Follow-up:** *Why a counter prop and not a global store?* One list, two
+  triggers: a counter is the smallest thing that works. With more shared
+  server state I'd use a query cache such as TanStack Query.
+
+### 30. Accessibility
+- Icon buttons have labels; paper cards are real buttons; the paper/chat
+  divider is a `role="separator"` you can move with the arrow keys; pop-ups
+  use the native `<dialog>` (Escape closes it, focus stays inside, the page
+  behind is inert); Enter doesn't send while an input method (e.g. for Hindi)
+  is composing; each page has its own title; animations respect "reduce
+  motion".
+- Contrast: white text on `teal-500` is about 2.5:1, below the WCAG minimum
+  of 4.5:1. Buttons now use `teal-700` (about 5.5:1).
+- **Follow-up:** *Why `<dialog>` and not a div?* `showModal()` gives focus
+  containment, Escape and an inert background from the browser. A div modal
+  has to rebuild all three and usually misses one.
+
+### 31. Small bugs found on the way
+- Search highlighting reused a `/g` regex with `test()`, which keeps its
+  position (`lastIndex`) between calls, so some matches weren't highlighted.
+  Now it uses `split()` with a capture group (matches land at odd indexes).
+- Windows reports `.csv` files as `application/vnd.ms-excel`, so the chat
+  rejected CSV attachments. It now checks the file extension.
+- Dragging the divider stopped working over the PDF, because an iframe
+  swallows mouse events. A transparent overlay covers the page while
+  dragging.
+- A failed paper-list load showed the error and "No papers uploaded yet" at
+  the same time.
+
+---
+
 ## What I'd still change (say this before they ask)
 
-- Sanitise model output before rendering it as HTML (XSS risk from text in a
-  malicious PDF).
 - Fix chat-history saving, add upload size limits and rate limiting.
 - Remove unused dependencies and work through the `npm audit` findings.
-- Stop the client's artificial 20 ms-per-character display delay.
-- Add browser tests for the UI parts (sources, upload messages), which the
-  server-side tests don't cover.
+- Turn the Puppeteer checks into real browser tests in the repo (sources,
+  upload messages, the phone layout), since the server tests don't cover the
+  UI.

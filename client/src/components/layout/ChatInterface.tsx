@@ -1,6 +1,4 @@
-// src/Components/layout/ChatInterface.tsx
-
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
 	MessageCircle,
 	Send,
@@ -12,13 +10,15 @@ import {
 	VolumeX,
 	X,
 	FileText,
+	AlertCircle,
 } from 'lucide-react';
 import { marked } from 'marked';
-import SpeechRecognition, {
-	useSpeechRecognition,
-} from 'react-speech-recognition';
+import DOMPurify from 'dompurify';
+import { clsx } from 'clsx';
+import SpeechRecognition, { useSpeechRecognition } from 'react-speech-recognition';
 import CodeBlock from '../common/CodeBlock';
 import { API_BASE_URL as backendUrl } from '../../config';
+import { NETWORK_ERROR, readError } from '../../utils/http';
 
 interface Paper {
 	_id: string;
@@ -35,13 +35,51 @@ interface Source {
 }
 
 interface Message {
-	id: string;
+	id: number;
 	type: 'user' | 'assistant';
 	content: string;
-	timestamp: Date;
 	isStreaming?: boolean;
 	sources?: Source[];
+	// A failed question and its error reply: shown, but not sent back to the
+	// model as conversation history.
+	isError?: boolean;
 }
+
+interface ChatInterfaceProps {
+	selectedPaper: Paper | null;
+}
+
+// Files the server can read when attached to a question: PDFs, and plain
+// text read as UTF-8. Checked by extension, because browsers report types
+// inconsistently (Windows calls .csv "application/vnd.ms-excel").
+const ATTACHMENT_TYPES = ['pdf', 'txt', 'md', 'csv', 'json'];
+const MAX_ATTACHMENT_MB = 20;
+
+const PAPER_SUGGESTIONS = [
+	'Summarize this paper in a few sentences',
+	'What are the main contributions?',
+	'What methods and data did the authors use?',
+	'What are the limitations?',
+];
+
+class ChatError extends Error {
+	status: number;
+	constructor(status: number, message: string) {
+		super(message);
+		this.status = status;
+	}
+}
+
+const describeError = (err: unknown) => {
+	if (err instanceof ChatError) {
+		if (err.status === 401) return 'Your session has expired. Please log in again.';
+		// The server says what went wrong (e.g. "Paper not found.").
+		return err.message
+			? `Sorry, I couldn't answer that: ${err.message}`
+			: 'Sorry, something went wrong while answering. Please try again.';
+	}
+	return NETWORK_ERROR;
+};
 
 // The header holds URL-encoded JSON; anything unexpected means "no sources".
 const parseSources = (header: string | null): Source[] => {
@@ -54,670 +92,460 @@ const parseSources = (header: string | null): Source[] => {
 	}
 };
 
-interface ChatInterfaceProps {
-	selectedPaper: Paper | null;
+// Sends the question and passes each piece of the answer to onText as soon as
+// it arrives. Resolves with the answer's sources.
+async function streamAnswer(form: FormData, onText: (text: string) => void): Promise<Source[]> {
+	const res = await fetch(`${backendUrl}/chat`, { method: 'POST', body: form, credentials: 'include' });
+	if (!res.ok) throw new ChatError(res.status, await readError(res, ''));
+
+	const sources = parseSources(res.headers.get('X-Sources'));
+	const reader = res.body?.getReader();
+	if (reader) {
+		const decoder = new TextDecoder();
+		for (;;) {
+			const { value, done } = await reader.read();
+			if (done) break;
+			onText(decoder.decode(value, { stream: true }));
+		}
+		const rest = decoder.decode();
+		if (rest) onText(rest);
+	}
+	return sources;
 }
 
-// Custom hook for streaming chat with enhanced features
-const useEnhancedStreamingChat = () => {
-	const [isLoading, setIsLoading] = useState(false);
+// Splits an answer into markdown text and fenced code blocks.
+const splitCodeBlocks = (text: string) => {
+	const fence = /```(\w+)?\n([\s\S]*?)```/g;
+	const parts: Array<{ type: 'text' | 'code'; content: string; language?: string }> = [];
+	let last = 0;
+	let match: RegExpExecArray | null;
+	while ((match = fence.exec(text)) !== null) {
+		if (match.index > last) parts.push({ type: 'text', content: text.slice(last, match.index) });
+		parts.push({ type: 'code', content: match[2], language: match[1] || 'text' });
+		last = fence.lastIndex;
+	}
+	if (last < text.length) parts.push({ type: 'text', content: text.slice(last) });
+	return parts;
+};
 
-	const sendMessage = async (
-		question: string,
-		history: Array<{ role: string; text: string }>,
-		file?: File,
-		paperId?: string,
-		onChunk?: (chunk: string) => void,
-		onComplete?: (sources: Source[]) => void
-	) => {
+// The model's markdown, rendered as HTML. Sanitized, because the text comes
+// from an AI model that has read user-supplied documents.
+const Markdown: React.FC<{ text: string }> = ({ text }) => {
+	const html = useMemo(() => DOMPurify.sanitize(marked.parse(text, { async: false }) as string), [text]);
+	return (
+		<div
+			className='prose prose-sm prose-gray max-w-none prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-headings:mt-4 prose-headings:mb-2 prose-a:text-teal-700'
+			dangerouslySetInnerHTML={{ __html: html }}
+		/>
+	);
+};
+
+const formatSource = (source: Source) =>
+	source.scope === 'excerpts' && source.excerpts?.length
+		? `${source.title} (excerpts ${source.excerpts.map((n) => n + 1).join(', ')})`
+		: `${source.title} (${source.scope})`;
+
+const toHistory = (messages: Message[]) =>
+	messages
+		.filter((m) => !m.isError && !m.isStreaming)
+		.map((m) => ({ role: m.type === 'user' ? 'user' : 'assistant', text: m.content }))
+		// The model expects turns to alternate, starting with the user.
+		.filter((m, i, all) => (i === 0 ? m.role === 'user' : all[i - 1].role !== m.role));
+
+const iconButton =
+	'h-11 w-11 shrink-0 rounded-xl flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500';
+
+const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedPaper }) => {
+	const [messages, setMessages] = useState<Message[]>([]);
+	const [input, setInput] = useState('');
+	const [isLoading, setIsLoading] = useState(false);
+	const [attachment, setAttachment] = useState<File | null>(null);
+	const [attachmentError, setAttachmentError] = useState('');
+	const [readAloud, setReadAloud] = useState(false);
+
+	const listRef = useRef<HTMLDivElement>(null);
+	const stickToBottom = useRef(true);
+	const textareaRef = useRef<HTMLTextAreaElement>(null);
+	const fileInputRef = useRef<HTMLInputElement>(null);
+	const nextId = useRef(1);
+	const messagesRef = useRef(messages);
+	messagesRef.current = messages;
+	const hintId = useId();
+
+	const { transcript, listening, resetTranscript, browserSupportsSpeechRecognition } = useSpeechRecognition();
+	const canSpeak = typeof window !== 'undefined' && 'speechSynthesis' in window;
+
+	// Follow the answer as it streams in, unless the user has scrolled up to
+	// read something earlier.
+	useEffect(() => {
+		const list = listRef.current;
+		if (list && stickToBottom.current) list.scrollTop = list.scrollHeight;
+	}, [messages]);
+
+	const handleScroll = () => {
+		const list = listRef.current;
+		if (list) stickToBottom.current = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+	};
+
+	// Show what is being dictated while the microphone is on.
+	useEffect(() => {
+		if (listening) setInput(transcript);
+	}, [listening, transcript]);
+
+	// Save the conversation when the page is closed.
+	useEffect(() => {
+		const save = () => {
+			const history = toHistory(messagesRef.current);
+			if (history.length === 0) return;
+			fetch(`${backendUrl}/chat/save-history`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				credentials: 'include',
+				body: JSON.stringify({ history }),
+				keepalive: true,
+			}).catch(() => {});
+		};
+		window.addEventListener('beforeunload', save);
+		return () => window.removeEventListener('beforeunload', save);
+	}, []);
+
+	const resizeTextarea = (el: HTMLTextAreaElement) => {
+		el.style.height = 'auto';
+		el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+	};
+
+	const updateMessage = (id: number, changes: Partial<Message>) =>
+		setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...changes } : m)));
+
+	const speak = (text: string) => {
+		const synth = window.speechSynthesis;
+		const utterance = new SpeechSynthesisUtterance(text.replace(/[*_#`>]+/g, ''));
+		utterance.voice = synth.getVoices().find((v) => v.lang === 'en-US') || null;
+		synth.speak(utterance);
+	};
+
+	const send = async (text: string) => {
+		const question = text.trim();
+		if (!question || isLoading) return;
+		if (listening) {
+			SpeechRecognition.stopListening();
+			resetTranscript();
+		}
+
+		const form = new FormData();
+		form.append('question', question);
+		form.append('history', JSON.stringify(toHistory(messages)));
+		// An attached file takes priority; otherwise the selected paper's
+		// database id (titles are not unique). With neither, the server picks
+		// the most relevant of the user's papers.
+		if (attachment) form.append('file', attachment);
+		else if (selectedPaper) form.append('paperId', selectedPaper._id);
+
+		const questionId = nextId.current++;
+		const answerId = nextId.current++;
+		setMessages((prev) => [
+			...prev,
+			{ id: questionId, type: 'user', content: question },
+			{ id: answerId, type: 'assistant', content: '', isStreaming: true },
+		]);
+		setInput('');
+		if (textareaRef.current) textareaRef.current.style.height = 'auto';
+		stickToBottom.current = true;
 		setIsLoading(true);
 
+		let answer = '';
 		try {
-			const formData = new FormData();
-			formData.append('question', question);
-
-			// Ensure history is always an array
-			const safeHistory = Array.isArray(history) ? history : [];
-			formData.append('history', JSON.stringify(safeHistory));
-
-			if (file) {
-				formData.append('file', file);
-			}
-
-			if (paperId && !file) {
-				console.log('Sending paperId:', paperId, typeof paperId);
-				formData.append('paperId', paperId);
-
-				// Debug FormData contents
-				for (let [key, value] of formData.entries()) {
-					console.log('FormData entry:', key, value, typeof value);
-				}
-			}
-
-			const response = await fetch(`${backendUrl}/chat`, {
-				method: 'POST',
-				body: formData,
-				credentials: 'include',
+			const sources = await streamAnswer(form, (piece) => {
+				answer += piece;
+				updateMessage(answerId, { content: answer });
 			});
-
-			if (!response.ok) {
-				const errorData = await response.json().catch(() => ({}));
-				throw new Error(
-					errorData.error ||
-						errorData.msg ||
-						`HTTP error! status: ${response.status}`
-				);
-			}
-
-			const sources = parseSources(response.headers.get('X-Sources'));
-
-			// Rest of your streaming logic remains the same
-			const reader = response.body?.getReader();
-			const decoder = new TextDecoder();
-
-			if (reader) {
-				let done = false;
-				while (!done) {
-					const { value, done: readerDone } = await reader.read();
-					done = readerDone;
-					if (value) {
-						const chunkText = decoder.decode(value, { stream: true });
-						for (let i = 0; i < chunkText.length; i++) {
-							await new Promise((resolve) => setTimeout(resolve, 20));
-							onChunk?.(chunkText[i]);
-						}
-					}
-				}
-			}
-
-			onComplete?.(sources);
-		} catch (error) {
-			console.error('Chat error:', error);
-			throw error;
+			updateMessage(answerId, { isStreaming: false, sources });
+			if (readAloud && canSpeak && answer.trim()) speak(answer);
+			setAttachment(null);
+			if (fileInputRef.current) fileInputRef.current.value = '';
+		} catch (err) {
+			setMessages((prev) => [
+				...prev
+					.filter((m) => m.id !== answerId)
+					.map((m) => (m.id === questionId ? { ...m, isError: true } : m)),
+				{ id: nextId.current++, type: 'assistant', content: describeError(err), isError: true },
+			]);
 		} finally {
 			setIsLoading(false);
 		}
 	};
 
-	return { sendMessage, isLoading };
-};
-
-// const checkAuthStatus = async () => {
-// 	try {
-// 		const response = await fetch(`${backendUrl}/auth/verify`, {
-// 			method: 'GET',
-// 			credentials: 'include',
-// 		});
-// 		return response.ok;
-// 	} catch (error) {
-// 		console.error('Auth check failed:', error);
-// 		return false;
-// 	}
-// };
-
-// Helper function to extract code blocks
-const extractCodeBlocks = (text: string) => {
-	const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
-	const parts: Array<{
-		type: 'text' | 'code';
-		content: string;
-		language?: string;
-	}> = [];
-	let lastIndex = 0;
-
-	let match: RegExpExecArray | null;
-	while ((match = codeBlockRegex.exec(text)) !== null) {
-		if (match.index > lastIndex) {
-			parts.push({
-				type: 'text',
-				content: text.slice(lastIndex, match.index),
-			});
-		}
-		parts.push({
-			type: 'code',
-			content: match[2],
-			language: match[1] || 'text',
-		});
-		lastIndex = codeBlockRegex.lastIndex;
-	}
-
-	if (lastIndex < text.length) {
-		parts.push({ type: 'text', content: text.slice(lastIndex) });
-	}
-
-	return parts;
-};
-
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedPaper }) => {
-	const [messages, setMessages] = useState<Message[]>([
-		{
-			id: '1',
-			type: 'assistant',
-			content: selectedPaper
-				? `Welcome! I'm your AI research assistant. I can help you understand this paper on "${selectedPaper.title}". What would you like to know?`
-				: "Welcome! I'm your AI research assistant. I can help you understand research papers. Attach a paper to get started.",
-			timestamp: new Date(),
-		},
-	]);
-
-	const [inputMessage, setInputMessage] = useState('');
-	const [selectedFile, setSelectedFile] = useState<File | null>(null);
-	const [isTTSActive, setIsTTSActive] = useState(false);
-	const [error, setError] = useState('');
-
-	// Refs
-	const messagesEndRef = useRef<HTMLDivElement>(null);
-	const fileInputRef = useRef<HTMLInputElement>(null);
-	const textareaRef = useRef<HTMLTextAreaElement>(null);
-	const chatHistoryRef = useRef<
-		Array<{ role: string; parts: Array<{ text: string }> }>
-	>([]);
-
-	// Speech recognition setup
-	const {
-		transcript,
-		listening,
-		resetTranscript,
-		browserSupportsSpeechRecognition,
-	} = useSpeechRecognition();
-
-	const { sendMessage, isLoading } = useEnhancedStreamingChat();
-
-	const scrollToBottom = () => {
-		messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-	};
-
-	useEffect(() => {
-		scrollToBottom();
-	}, [messages]);
-
-	// Auto-resize textarea
-	const handleTextareaResize = (textarea: HTMLTextAreaElement) => {
-		textarea.style.height = 'auto';
-		const newHeight = Math.min(textarea.scrollHeight, 120); // Max ~3 lines
-		textarea.style.height = `${newHeight}px`;
-	};
-
-	// Speech recognition handlers
-	const startListening = () => {
-		SpeechRecognition.startListening({ continuous: true });
-	};
-
-	const stopListening = () => {
-		SpeechRecognition.stopListening();
-		setInputMessage(transcript);
-		resetTranscript();
-	};
-
-	// Text-to-speech function
-	const speakOutLoud = (text: string) => {
-		const synth = window.speechSynthesis;
-		const utterance = new SpeechSynthesisUtterance(text);
-		utterance.voice =
-			synth.getVoices().find((voice) => voice.lang === 'en-US') || null;
-		synth.speak(utterance);
-	};
-
-	// Enhanced history management
-	const pushHistory = (role: string, message: string) => {
-		chatHistoryRef.current.push({ role, parts: [{ text: message }] });
-	};
-
-	// Convert messages to backend format for history
-	// const getHistoryForBackend = () => {
-	// 	return chatHistoryRef.current.map((msg) => ({
-	// 		role: msg.role === 'user' ? 'user' : 'model',
-	// 		text: msg.parts.map((part) => part.text).join(' '),
-	// 	}));
-	// };
-
-	const handleSendMessage = async () => {
-		if (!inputMessage.trim() || isLoading) return;
-
-		// If no paper selected AND no file attached, don't send
-		if (!inputMessage.trim() || isLoading) return;
-
-		const trimmedQuestion = inputMessage.trim();
-
-		const userMessage: Message = {
-			id: Date.now().toString(),
-			type: 'user',
-			content: trimmedQuestion,
-			timestamp: new Date(),
-		};
-
-		setMessages((prev) => [...prev, userMessage]);
-		pushHistory('user', trimmedQuestion);
-
-		const assistantMessageId = (Date.now() + 1).toString();
-		const streamingMessage: Message = {
-			id: assistantMessageId,
-			type: 'assistant',
-			content: '',
-			timestamp: new Date(),
-			isStreaming: true,
-		};
-
-		setMessages((prev) => [...prev, streamingMessage]);
-		setInputMessage('');
-
-		try {
-			let accumulatedContent = '';
-
-			// The paper's database id: titles are not unique and may come from
-			// the PDF's own metadata, so the server could not find papers by them.
-			const paperIdToSend =
-				selectedPaper && !selectedFile ? selectedPaper._id : undefined;
-
-			const formattedHistory = messages
-				.map((msg) => ({
-					role: msg.type === 'user' ? 'user' : 'assistant',
-					text: msg.content,
-				}))
-				.filter((msg, index, arr) => {
-					// Remove consecutive messages from same role
-					if (index === 0) return msg.role === 'user'; // First must be user
-					return arr[index - 1].role !== msg.role; // Ensure alternating
-				});
-
-			await sendMessage(
-				trimmedQuestion,
-				formattedHistory,
-				selectedFile || undefined,
-				paperIdToSend,
-				(char: string) => {
-					accumulatedContent += char;
-					setMessages((prev) =>
-						prev.map((msg) =>
-							msg.id === assistantMessageId
-								? { ...msg, content: accumulatedContent }
-								: msg
-						)
-					);
-				},
-				(sources) => {
-					setMessages((prev) =>
-						prev.map((msg) =>
-							msg.id === assistantMessageId
-								? { ...msg, isStreaming: false, sources }
-								: msg
-						)
-					);
-
-					pushHistory('assistant', accumulatedContent);
-
-					if (isTTSActive && accumulatedContent.trim()) {
-						speakOutLoud(accumulatedContent);
-					}
-
-					setSelectedFile(null);
-					if (fileInputRef.current) {
-						fileInputRef.current.value = '';
-					}
-				}
-			);
-		} catch (error) {
-			// Remove the streaming message if there's an error
-			setMessages((prev) =>
-				prev.filter((msg) => msg.id !== assistantMessageId)
-			);
-
-			let errorMessage =
-				'Sorry, I encountered an error while processing your question.';
-			const reason = (error as Error).message || '';
-
-			if (
-				reason.includes('401') ||
-				reason.includes('authorization denied') ||
-				reason.includes('Token is not valid')
-			) {
-				errorMessage = 'Your session has expired. Please log in again.';
-			} else if (/Failed to fetch|NetworkError/i.test(reason)) {
-				errorMessage =
-					"Sorry, I couldn't reach the server. Check that it is running (or waking up) and try again.";
-			} else if (reason && !/HTTP error/i.test(reason)) {
-				// The server says what went wrong (e.g. "Paper not found.",
-				// "You have no papers uploaded..."); show it instead of hiding it.
-				errorMessage = `Sorry, I couldn't answer that: ${reason}`;
-			}
-
-			const errorMsg: Message = {
-				id: (Date.now() + 2).toString(),
-				type: 'assistant',
-				content: errorMessage,
-				timestamp: new Date(),
-			};
-			setMessages((prev) => [...prev, errorMsg]);
-		}
-	};
-
-	// File selection & validation
-	const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-		const file = event.target.files?.[0];
+	const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+		const file = e.target.files?.[0];
 		if (!file) return;
+		const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+		let problem = '';
+		if (!ATTACHMENT_TYPES.includes(ext)) problem = 'That file type isn’t supported. Attach a PDF, TXT, MD, CSV or JSON file.';
+		else if (file.size > MAX_ATTACHMENT_MB * 1024 * 1024) problem = `Files can be at most ${MAX_ATTACHMENT_MB} MB.`;
 
-		const validTypes = [
-			'application/pdf',
-			'text/plain',
-			'text/csv',
-			'application/json',
-		];
-		const maxSizeInMB = 20;
-
-		if (!validTypes.includes(file.type)) {
-			setError(
-				'File type not supported. Please upload a PDF, TXT, CSV, or JSON file.'
-			);
-			setSelectedFile(null);
-			if (fileInputRef.current) fileInputRef.current.value = '';
-			return;
-		}
-
-		if (file.size > maxSizeInMB * 1024 * 1024) {
-			setError(`File size should not exceed ${maxSizeInMB} MB.`);
-			setSelectedFile(null);
-			if (fileInputRef.current) fileInputRef.current.value = '';
-			return;
-		}
-
-		setSelectedFile(file);
-		setError('');
+		setAttachmentError(problem);
+		setAttachment(problem ? null : file);
+		if (problem && fileInputRef.current) fileInputRef.current.value = '';
 	};
 
-	const handleRemoveFile = () => {
-		setSelectedFile(null);
-		setError('');
-		if (fileInputRef.current) {
-			fileInputRef.current.value = '';
+	const removeAttachment = () => {
+		setAttachment(null);
+		setAttachmentError('');
+		if (fileInputRef.current) fileInputRef.current.value = '';
+	};
+
+	const toggleReadAloud = () => {
+		if (readAloud) window.speechSynthesis.cancel();
+		setReadAloud((on) => !on);
+	};
+
+	const toggleListening = () => {
+		if (listening) {
+			SpeechRecognition.stopListening();
+			resetTranscript();
+		} else {
+			resetTranscript();
+			SpeechRecognition.startListening({ continuous: true });
 		}
 	};
 
-	const toggleTTS = () => setIsTTSActive((prev) => !prev);
-
-	// Save chat history on page unload
-	useEffect(() => {
-		const handleBeforeUnload = () => {
-			const historyToSave = chatHistoryRef.current;
-			if (historyToSave.length > 0) {
-				// Convert to the format expected by your backend
-				const formattedHistory = historyToSave.map((msg) => ({
-					role: msg.role === 'user' ? 'user' : 'assistant',
-					text: msg.parts.map((part) => part.text).join(' '),
-				}));
-
-				fetch(`${backendUrl}/chat/save-history`, {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-					},
-					credentials: 'include', // Include cookies
-					body: JSON.stringify({ history: formattedHistory }),
-					keepalive: true,
-				}).catch(console.error);
-			}
-		};
-
-		window.addEventListener('beforeunload', handleBeforeUnload);
-		return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-	}, []);
-
-	const suggestedQuestions = selectedPaper
-		? [
-				'Can you explain the key innovation in this paper compared to previous sequence models?',
-				'What are the main contributions of this research?',
-				'How does the methodology work in this paper?',
-				'What are the experimental results and their significance?',
-		  ]
-		: [];
-
-	const canSendMessage = inputMessage.trim() && !isLoading;
+	const subtitle = attachment
+		? `Answering from ${attachment.name}`
+		: selectedPaper
+			? `About: ${selectedPaper.title}`
+			: 'Searching all your papers';
+	const placeholder = attachment
+		? 'Ask about the attached file…'
+		: selectedPaper
+			? 'Ask about this paper…'
+			: 'Ask about your papers…';
+	const canSend = input.trim().length > 0 && !isLoading;
 
 	return (
 		<div className='h-full flex flex-col bg-gray-50'>
 			{/* Header */}
-			<div className='bg-white border-b border-gray-200 px-6 py-4'>
-				<div className='flex items-center justify-between'>
-					<div className='flex items-center space-x-3'>
-						<div className='w-10 h-10 bg-gradient-to-br from-teal-500 to-teal-600 rounded-xl flex items-center justify-center shadow-sm'>
-							<MessageCircle className='w-5 h-5 text-white' />
-						</div>
-						<div>
-							<h1 className='text-lg font-semibold text-gray-900'>
-								Vega - AI Research Assistant
-							</h1>
-							{selectedPaper
-								? `Analyzing: ${selectedPaper.title}`
-								: selectedFile
-								? `Ready to analyze: ${selectedFile.name}`
-								: 'Ask questions about research papers or attach one for specific analysis'}
-						</div>
+			<div className='bg-white border-b border-gray-200 px-4 sm:px-6 py-3 flex items-center justify-between gap-3'>
+				<div className='flex items-center gap-3 min-w-0'>
+					<div className='w-9 h-9 rounded-xl bg-teal-50 flex items-center justify-center shrink-0'>
+						<MessageCircle className='w-5 h-5 text-teal-700' aria-hidden='true' />
 					</div>
-
-					{/* TTS Toggle */}
+					<div className='min-w-0'>
+						<h2 className='text-base font-semibold text-gray-900'>InCite assistant</h2>
+						<p className='text-sm text-gray-500 truncate'>{subtitle}</p>
+					</div>
+				</div>
+				{canSpeak && (
 					<button
-						onClick={toggleTTS}
-						className={`cursor-pointer h-10 w-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
-							isTTSActive
-								? 'bg-teal-100 text-teal-700 shadow-sm'
-								: 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-						}`}
-						title={
-							isTTSActive ? 'Disable Text-to-Speech' : 'Enable Text-to-Speech'
-						}
-					>
-						{isTTSActive ? (
-							<Volume2 className='w-4 h-4' />
-						) : (
-							<VolumeX className='w-4 h-4' />
+						type='button'
+						onClick={toggleReadAloud}
+						aria-pressed={readAloud}
+						aria-label='Read answers aloud'
+						title={readAloud ? 'Reading answers aloud' : 'Read answers aloud'}
+						className={clsx(
+							'h-10 w-10 shrink-0 rounded-lg flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500',
+							readAloud ? 'bg-teal-100 text-teal-800' : 'text-gray-500 hover:bg-gray-100'
 						)}
+					>
+						{readAloud ? <Volume2 className='w-5 h-5' /> : <VolumeX className='w-5 h-5' />}
 					</button>
-				</div>
+				)}
 			</div>
 
-			{/* Messages */}
-			<div className='flex-1 overflow-y-auto px-6 py-4 space-y-6'>
-				{messages.map((message) => {
-					const parts =
-						message.type === 'assistant'
-							? extractCodeBlocks(message.content)
-							: [{ type: 'text' as const, content: message.content }];
-
-					return (
-						<div
-							key={message.id}
-							className={`flex ${
-								message.type === 'user' ? 'justify-end' : 'justify-start'
-							}`}
-						>
-							<div
-								className={`max-w-xs lg:max-w-2xl px-4 py-3 rounded-2xl shadow-sm ${
-									message.type === 'user'
-										? 'bg-teal-100 text-teal-900 ml-12'
-										: 'bg-white text-gray-800 mr-12'
-								}`}
-							>
-								{parts.map((part, i) =>
-									part.type === 'code' ? (
-										<CodeBlock
-											key={i}
-											code={part.content}
-											language={part.language || 'text'}
-										/>
-									) : (
-										<div
-											key={i}
-											className='text-sm leading-relaxed'
-											dangerouslySetInnerHTML={{ __html: marked(part.content) }}
-										/>
-									)
-								)}
-
-								{!message.isStreaming && message.sources && message.sources.length > 0 && (
-									<div className='mt-2 pt-2 border-t border-gray-100 text-xs text-gray-500'>
-										<span className='font-medium'>Sources: </span>
-										{message.sources.map((source, i) => (
-											<span key={i}>
-												{i > 0 && '; '}
-												{source.title}
-												{source.scope === 'excerpts' && source.excerpts?.length
-													? ` (excerpts ${source.excerpts.map((n) => n + 1).join(', ')})`
-													: ` (${source.scope})`}
-											</span>
-										))}
-									</div>
-								)}
-
-								{message.isStreaming && (
-									<div className='flex items-center mt-2 pt-2 border-t border-gray-200'>
-										<Loader2 className='w-3 h-3 animate-spin mr-2 text-teal-500' />
-										<span className='text-xs text-gray-500'>Thinking...</span>
-									</div>
-								)}
-							</div>
+			{/* Conversation */}
+			<div
+				ref={listRef}
+				onScroll={handleScroll}
+				role='log'
+				aria-label='Conversation'
+				aria-busy={isLoading}
+				className='flex-1 overflow-y-auto px-4 sm:px-6 py-5'
+			>
+				{messages.length === 0 ? (
+					<div className='min-h-full flex flex-col items-center justify-center text-center py-6'>
+						<div className='w-12 h-12 rounded-2xl bg-teal-50 flex items-center justify-center mb-4'>
+							<MessageCircle className='w-6 h-6 text-teal-700' aria-hidden='true' />
 						</div>
-					);
-				})}
-				<div ref={messagesEndRef} />
-			</div>
-
-			{/* Suggested Questions */}
-			{suggestedQuestions.length > 0 && messages.length <= 1 && (
-				<div className='px-6 py-3 bg-teal-50 border-y border-teal-100'>
-					<div className='grid grid-cols-1 md:grid-cols-2 gap-2'>
-						{suggestedQuestions.slice(0, 4).map((question, index) => (
-							<button
-								key={index}
-								className='text-left bg-white border border-teal-200 rounded-lg p-3 text-sm text-teal-700 hover:bg-teal-50 hover:border-teal-300 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed'
-								onClick={() => setInputMessage(question)}
-								disabled={isLoading}
-							>
-								{question}
-							</button>
-						))}
+						<h3 className='text-lg font-semibold text-gray-900'>
+							{selectedPaper ? 'Ask about this paper' : 'Ask about your papers'}
+						</h3>
+						<p className='mt-1 max-w-md text-sm text-gray-600'>
+							{selectedPaper
+								? `Answers come from “${selectedPaper.title}” and list the passages they used.`
+								: 'I’ll find the most relevant of your papers and answer from it. To focus on one paper, select it from your paper list.'}
+						</p>
+						{selectedPaper && (
+							<div className='mt-6 flex flex-wrap justify-center gap-2 max-w-lg'>
+								{PAPER_SUGGESTIONS.map((q) => (
+									<button
+										key={q}
+										type='button'
+										onClick={() => send(q)}
+										disabled={isLoading}
+										className='rounded-full border border-teal-200 bg-white px-3 py-1.5 text-sm text-teal-800 hover:bg-teal-50 hover:border-teal-300 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 disabled:opacity-50'
+									>
+										{q}
+									</button>
+								))}
+							</div>
+						)}
 					</div>
-				</div>
-			)}
+				) : (
+					<div className='space-y-5'>
+						{messages.map((message) =>
+							message.type === 'user' ? (
+								<div key={message.id} className='flex justify-end'>
+									<div
+										className={clsx(
+											'max-w-[85%] rounded-2xl rounded-br-md px-4 py-2.5 text-sm whitespace-pre-wrap break-words',
+											message.isError ? 'bg-gray-200 text-gray-700' : 'bg-teal-700 text-white'
+										)}
+									>
+										{message.content}
+									</div>
+								</div>
+							) : (
+								<div key={message.id} className='flex justify-start'>
+									<div
+										className={clsx(
+											'max-w-[85%] min-w-0 rounded-2xl rounded-bl-md border px-4 py-3 text-sm shadow-sm',
+											message.isError ? 'border-red-200 bg-red-50 text-red-800' : 'border-gray-200 bg-white text-gray-800'
+										)}
+									>
+										{message.isError ? (
+											<p className='flex items-start gap-2'>
+												<AlertCircle className='w-4 h-4 mt-0.5 shrink-0' aria-hidden='true' />
+												{message.content}
+											</p>
+										) : message.isStreaming && !message.content ? (
+											<p className='flex items-center gap-2 text-gray-500'>
+												<Loader2 className='w-4 h-4 animate-spin text-teal-600' aria-hidden='true' />
+												Thinking…
+											</p>
+										) : (
+											splitCodeBlocks(message.content).map((part, i) =>
+												part.type === 'code' ? (
+													<CodeBlock key={i} code={part.content} language={part.language || 'text'} />
+												) : (
+													<Markdown key={i} text={part.content} />
+												)
+											)
+										)}
 
-			{/* File Attachment Display */}
-			{selectedFile && (
-				<div className='px-6 py-3 bg-blue-50 border-t border-blue-100'>
-					<div className='flex items-center justify-between bg-white rounded-lg p-3 border border-blue-200'>
-						<div className='flex items-center space-x-3'>
-							<FileText className='w-5 h-5 text-blue-500' />
-							<div className='flex-1 min-w-0'>
-								<p className='text-sm font-medium text-gray-900 truncate'>
-									{selectedFile.name}
-								</p>
-								<p className='text-xs text-gray-500'>
-									{(selectedFile.size / 1024 / 1024).toFixed(2)} MB
-								</p>
-							</div>
-						</div>
+										{!message.isStreaming && message.sources && message.sources.length > 0 && (
+											<p className='mt-2 pt-2 border-t border-gray-100 text-xs text-gray-500'>
+												<span className='font-medium text-gray-600'>Sources: </span>
+												{message.sources.map(formatSource).join('; ')}
+											</p>
+										)}
+									</div>
+								</div>
+							)
+						)}
+					</div>
+				)}
+			</div>
+
+			{/* Composer */}
+			<div className='bg-white border-t border-gray-200 px-3 sm:px-6 py-3'>
+				{attachmentError && (
+					<p role='alert' className='mb-2 text-sm text-red-600'>
+						{attachmentError}
+					</p>
+				)}
+				{attachment && (
+					<div className='mb-2 inline-flex max-w-full items-center gap-2 rounded-lg border border-teal-200 bg-teal-50 py-1.5 pl-3 pr-1 text-sm text-teal-900'>
+						<FileText className='w-4 h-4 shrink-0' aria-hidden='true' />
+						<span className='truncate'>{attachment.name}</span>
+						<span className='shrink-0 text-xs text-teal-700'>
+							{(attachment.size / 1024 / 1024).toFixed(1)} MB
+						</span>
 						<button
-							onClick={handleRemoveFile}
-							className='h-8 w-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors duration-200'
+							type='button'
+							onClick={removeAttachment}
+							aria-label={`Remove ${attachment.name}`}
+							className='p-1 rounded text-teal-700 hover:bg-teal-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500'
 						>
 							<X className='w-4 h-4' />
 						</button>
 					</div>
-				</div>
-			)}
+				)}
 
-			{/* Error Display */}
-			{error && (
-				<div className='px-6 py-2 bg-red-50 border-t border-red-100'>
-					<p className='text-sm text-red-600'>{error}</p>
-				</div>
-			)}
-
-			{/* Message Input */}
-			<div className='bg-white border-t border-gray-200 px-6 py-4'>
-				<div className='flex items-center space-x-3'>
-					{/* File Input */}
+				<div className='flex items-end gap-2'>
 					<input
 						ref={fileInputRef}
 						type='file'
-						accept='.pdf,.txt,.csv,.json'
+						accept={ATTACHMENT_TYPES.map((t) => `.${t}`).join(',')}
 						onChange={handleFileSelect}
 						className='hidden'
 					/>
 					<button
+						type='button'
 						onClick={() => fileInputRef.current?.click()}
-						className={`cursor-pointer h-10 w-10 rounded-lg flex items-center justify-center transition-colors duration-200 ${
-							selectedFile
-								? 'bg-blue-100 text-blue-600'
-								: 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-						}`}
-						title='Attach file'
+						aria-label='Attach a file to ask about (PDF, TXT, MD, CSV or JSON)'
+						title='Attach a file'
+						className={clsx(iconButton, attachment ? 'bg-teal-100 text-teal-800' : 'text-gray-500 hover:bg-gray-100')}
 					>
-						<Paperclip className='w-4 h-4' />
+						<Paperclip className='w-5 h-5' />
 					</button>
 
-					{/* Text Input */}
-					<div className='flex-1 flex items-center justify-center relative'>
+					<div className='relative flex-1 min-w-0'>
 						<textarea
 							ref={textareaRef}
-							value={inputMessage}
+							value={input}
+							rows={1}
 							onChange={(e) => {
-								setInputMessage(e.target.value);
-								handleTextareaResize(e.target);
+								setInput(e.target.value);
+								resizeTextarea(e.target);
 							}}
-							onKeyPress={(e) => {
-								if (e.key === 'Enter' && !e.shiftKey) {
+							onKeyDown={(e) => {
+								// Enter sends; Shift+Enter adds a line. Ignore Enter while an
+								// input method (e.g. for Hindi or Japanese) is composing.
+								if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
 									e.preventDefault();
-									handleSendMessage();
+									send(input);
 								}
 							}}
-							placeholder={
-								selectedPaper
-									? `Ask about "${selectedPaper.title}"... (Enter to send, Shift+Enter for new line)`
-									: selectedFile
-									? 'Ask about this document... (Enter to send, Shift+Enter for new line)'
-									: 'Ask me anything about research papers... (Enter to send, Shift+Enter for new line)'
-							}
-							className='w-full px-4 py-3 pr-12 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent resize-none bg-white disabled:bg-gray-50 disabled:text-gray-500 transition-colors duration-200'
-							disabled={isLoading}
-							rows={selectedPaper || selectedFile ? 2 : 1}
+							placeholder={listening ? 'Listening…' : placeholder}
+							aria-label='Message'
+							aria-describedby={hintId}
+							className={clsx(
+								'block w-full resize-none rounded-xl border border-gray-300 bg-white py-2.5 pl-4 text-sm leading-6 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent',
+								browserSupportsSpeechRecognition ? 'pr-11' : 'pr-4'
+							)}
 						/>
-
-						{/* Voice Input */}
 						{browserSupportsSpeechRecognition && (
 							<button
-								onClick={listening ? stopListening : startListening}
-								className={`cursor-pointer absolute right-3 top-1/2 transform -translate-y-1/2 h-6 w-6 rounded flex items-center justify-center transition-colors duration-200 ${
-									listening
-										? 'text-red-500 animate-pulse'
-										: 'text-gray-400 hover:text-gray-600'
-								}`}
-								title={listening ? 'Stop listening' : 'Start voice input'}
-							>
-								{listening ? (
-									<MicOff className='w-4 h-4' />
-								) : (
-									<Mic className='w-4 h-4' />
+								type='button'
+								onClick={toggleListening}
+								aria-pressed={listening}
+								aria-label='Voice input'
+								title={listening ? 'Stop voice input' : 'Voice input'}
+								className={clsx(
+									'absolute right-1.5 bottom-1.5 h-8 w-8 rounded-lg flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500',
+									listening ? 'text-red-600 bg-red-50 animate-pulse' : 'text-gray-400 hover:text-gray-600'
 								)}
+							>
+								{listening ? <MicOff className='w-4 h-4' /> : <Mic className='w-4 h-4' />}
 							</button>
 						)}
 					</div>
 
-					{/* Send Button */}
 					<button
-						onClick={handleSendMessage}
-						disabled={!canSendMessage}
-						className={`h-10 w-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
-							canSendMessage
-								? 'bg-teal-500 text-white hover:bg-teal-600 shadow-sm hover:shadow-md'
-								: 'bg-gray-300 text-gray-500 cursor-not-allowed'
-						}`}
-						title='Send message'
-					>
-						{isLoading ? (
-							<Loader2 className='w-4 h-4 animate-spin' />
-						) : (
-							<Send className='w-4 h-4' />
+						type='button'
+						onClick={() => send(input)}
+						disabled={!canSend}
+						aria-label='Send'
+						className={clsx(
+							iconButton,
+							'bg-teal-700 text-white hover:bg-teal-800 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed'
 						)}
+					>
+						{isLoading ? <Loader2 className='w-5 h-5 animate-spin' /> : <Send className='w-5 h-5' />}
 					</button>
 				</div>
+				<p id={hintId} className='hidden sm:block mt-1.5 text-xs text-gray-500'>
+					Enter to send · Shift+Enter for a new line
+				</p>
 			</div>
 		</div>
 	);

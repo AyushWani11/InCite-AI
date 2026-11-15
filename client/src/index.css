@@ -1,1 +1,3 @@
 @import "tailwindcss";
+/* `prose` classes: readable typography for the assistant's markdown answers. */
+@plugin "@tailwindcss/typography";

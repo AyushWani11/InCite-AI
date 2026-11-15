@@ -1,37 +1,39 @@
-/* ...existing code... */
 html {
 	scroll-behavior: smooth;
 }
-.main-container::before {
-	content: '';
-	position: absolute;
-	top: 0;
-	left: 0;
-	right: 0;
-	height: 4px;
-	background: linear-gradient(-90deg, #4db6ac, #26a69a, #00897b);
-}
 
+/* Thin, neutral scrollbars (Chrome, Edge, Safari) */
 *::-webkit-scrollbar {
 	width: 6px;
+	height: 6px;
 }
-
 *::-webkit-scrollbar-track {
-	background: #f5f5f5;
-	border-radius: 3px;
+	background: transparent;
 }
-
 *::-webkit-scrollbar-thumb {
-	background: #b2dfdb;
+	background: #d1d5db; /* gray-300 */
 	border-radius: 3px;
 }
-
 *::-webkit-scrollbar-thumb:hover {
-	background: #4db6ac;
+	background: #9ca3af; /* gray-400 */
 }
 
-/* For Firefox */
+/* Firefox */
 * {
 	scrollbar-width: thin;
-	scrollbar-color: #b2dfdb #f5f5f5;
+	scrollbar-color: #d1d5db transparent;
+}
+
+/* Respect the "reduce motion" system setting. */
+@media (prefers-reduced-motion: reduce) {
+	html {
+		scroll-behavior: auto;
+	}
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+	}
 }
