@@ -364,18 +364,21 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedPaper }) => {
 
 			let errorMessage =
 				'Sorry, I encountered an error while processing your question.';
+			const reason = (error as Error).message || '';
 
 			if (
-				(error as Error).message.includes('401') ||
-				(error as Error).message.includes('authorization denied')
+				reason.includes('401') ||
+				reason.includes('authorization denied') ||
+				reason.includes('Token is not valid')
 			) {
 				errorMessage = 'Your session has expired. Please log in again.';
-			} else if (
-				(error as Error).message.includes('404') &&
-				(error as Error).message.includes('relevant paper')
-			) {
+			} else if (/Failed to fetch|NetworkError/i.test(reason)) {
 				errorMessage =
-					'No relevant content found. Please try uploading a document or asking a different question.';
+					"Sorry, I couldn't reach the server. Check that it is running (or waking up) and try again.";
+			} else if (reason && !/HTTP error/i.test(reason)) {
+				// The server says what went wrong (e.g. "Paper not found.",
+				// "You have no papers uploaded..."); show it instead of hiding it.
+				errorMessage = `Sorry, I couldn't answer that: ${reason}`;
 			}
 
 			const errorMsg: Message = {
