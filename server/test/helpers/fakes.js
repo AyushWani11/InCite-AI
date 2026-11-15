@@ -127,7 +127,7 @@ class FakeGoogleGenAI {
 				if (!model) throw new Error('[fake gemini] model is required');
 				const call = { model, prompt: textOf(contents), request: { contents, config } };
 				state.gemini.calls.push(call);
-				return { text: state.gemini.generate(call) };
+				return { text: await state.gemini.generate(call) }; // may be async
 			},
 			// Like the real SDK: the promise settles once the request is
 			// accepted (a rejected request throws here), then pieces stream.

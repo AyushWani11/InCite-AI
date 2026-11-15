@@ -39,4 +39,4 @@ function splitIntoChunks(text, maxChunkSize = 400) {
 	return chunks;
 }
 
-module.exports = { splitIntoChunks };
+module.exports = { splitIntoChunks, splitLongPiece };

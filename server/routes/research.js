@@ -4,6 +4,12 @@ const { parsePdf } = require('../utils/pdf');
 const mongoose = require('mongoose');
 const { Readable } = require('stream');
 const { generateStructured, StructuredOutputError } = require('../utils/structured');
+const { generateFromFullPaper } = require('../utils/fullPaper');
+const {
+	buildMetadataPrompt,
+	summaryPrompts,
+	assessmentPrompts,
+} = require('../utils/prompts');
 const {
 	SUMMARY_SCHEMA,
 	ASSESSMENT_SCHEMA,
@@ -34,35 +40,15 @@ const upload = multer({
 	defParamCharset: 'utf8',
 });
 
-// The prompts describe the task; the field-by-field format comes from the
-// JSON schemas in utils/schemas.js, which Gemini is made to follow.
-const buildMetadataPrompt = (text) => `
-You are an academic assistant. From the research paper text below, extract
-the author names and 5 to 10 keywords that summarise the paper.
-
-Text:
-${text.substring(0, 6000)}
-`;
-
-const buildSummaryPrompt = (text) => `
-You are an expert academic summarizer. Write a structured summary of the
-research paper below that captures both depth and clarity.
-
-Text:
-${text.substring(0, 7000)}
-`;
-
-const buildAssessmentPrompt = (text) => `
-You are an academic research paper reviewer who focuses on content. Assume
-none of the figures are missing. Rate the writing quality, methodology and
-academic standards, give feedback on each, list actionable improvement
-suggestions and any issues (citation gaps, statistical problems, ...), and
-describe the paper's X-factor. The overall score (0-100) should be a fair
-reflection of the three ratings.
-
-Text:
-${text.substring(0, 10000)}
-`;
+// The paper's text, or null after answering 422 if the PDF has none
+// (e.g. a scanned image without a text layer).
+function textOrReject(res, text) {
+	if (text && text.trim()) return text;
+	res.status(422).json({
+		error: 'This PDF has no extractable text (it may be a scanned image), so it cannot be analysed.',
+	});
+	return null;
+}
 
 // A reply from Gemini we could not use even after one retry: answer 502
 // ("bad gateway": the upstream service misbehaved) with a helpful message.
@@ -239,13 +225,15 @@ router.post('/summarize/:paperId', authLogin, async (req, res) => {
 			return res.status(404).json({ error: 'Paper file not found' });
 		}
 
-		const fullText = (await parsePdf(pdfBuffer)).text;
+		const fullText = textOrReject(res, (await parsePdf(pdfBuffer)).text);
+		if (fullText === null) return;
 
 		// Only a reply that passes the schema check is saved.
-		const summary = await generateStructured({
-			prompt: buildSummaryPrompt(fullText),
+		const summary = await generateFromFullPaper({
+			text: fullText,
 			schema: SUMMARY_SCHEMA,
 			label: 'summary',
+			prompts: summaryPrompts,
 		});
 		paper.summary = summary;
 		await paper.save();
@@ -327,14 +315,16 @@ router.post('/assess/:paperId', authLogin, async (req, res) => {
 			return res.status(404).json({ error: 'Paper file not found' });
 		}
 
-		const text = (await parsePdf(pdfBuffer)).text;
+		const text = textOrReject(res, (await parsePdf(pdfBuffer)).text);
+		if (text === null) return;
 
 		// Only a reply that passes the schema check is saved (the client
 		// crashes on an assessment without e.g. score.overallScore).
-		const assessment = await generateStructured({
-			prompt: buildAssessmentPrompt(text),
+		const assessment = await generateFromFullPaper({
+			text,
 			schema: ASSESSMENT_SCHEMA,
 			label: 'assessment',
+			prompts: assessmentPrompts,
 		});
 		paper.assessment = assessment;
 		await paper.save();
