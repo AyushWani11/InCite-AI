@@ -68,6 +68,7 @@ const SignupPage: React.FC = () => {
 
 	return (
 		<AuthLayout
+			pageTitle='Sign up'
 			title='Create your account'
 			subtitle='Upload papers, ask questions, and get summaries in one place.'
 			footer={

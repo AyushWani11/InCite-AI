@@ -194,6 +194,7 @@ const Dashboard: React.FC = () => {
 
 	return (
 		<div className='h-dvh flex flex-col bg-gray-50'>
+			<title>{selectedPaper ? `${selectedPaper.title} · InCite AI` : 'Your papers · InCite AI'}</title>
 			<DashNavbar
 				user={user}
 				isDesktop={isDesktop}

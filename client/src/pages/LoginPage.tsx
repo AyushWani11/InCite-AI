@@ -39,6 +39,7 @@ const LoginPage: React.FC = () => {
 
 	return (
 		<AuthLayout
+			pageTitle='Log in'
 			title='Welcome back'
 			subtitle='Log in to chat with your research papers.'
 			footer={

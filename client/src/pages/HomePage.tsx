@@ -4,6 +4,7 @@ import { HeroSection, FeaturesSection, AnswersSection, HowItWorksSection } from 
 
 const HomePage: React.FC = () => (
 	<div className='min-h-screen bg-white'>
+		<title>InCite AI · Chat with your research papers</title>
 		<Navbar />
 		<main>
 			<HeroSection />
