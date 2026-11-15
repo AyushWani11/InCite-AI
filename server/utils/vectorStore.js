@@ -1,5 +1,6 @@
 const { Pinecone } = require('@pinecone-database/pinecone');
 const { splitIntoChunks } = require('./chunking');
+const { mapWithLimit, withRetry } = require('./async');
 require('dotenv').config();
 
 // Embeddings are made by Pinecone itself. The index uses "integrated
@@ -9,6 +10,7 @@ require('dotenv').config();
 // Switching embedding model means a new index (see scripts/reindex.js).
 const TEXT_FIELD = 'text';
 const UPSERT_BATCH_SIZE = 96; // most records Pinecone embeds per request
+const UPSERT_PARALLEL = 2; // batches in flight at once (gentle on rate limits)
 const RETURN_FIELDS = [TEXT_FIELD, 'paperId', 'title', 'chunkIndex'];
 
 const pc = new Pinecone({
@@ -52,12 +54,17 @@ async function addPaperChunks(paperId, userId, title, text) {
 		chunkIndex: i,
 	}));
 
-	// Batches are sent one after another. (Retries and clean-up of a
-	// half-indexed paper are not handled yet.)
+	// Batches of at most 96, two in flight at a time, each retried on rate
+	// limits and network errors. If one still fails, this throws; the caller
+	// is responsible for cleaning up the half-indexed paper.
 	const ns = userNamespace(userId);
+	const batches = [];
 	for (let start = 0; start < records.length; start += UPSERT_BATCH_SIZE) {
-		await ns.upsertRecords(records.slice(start, start + UPSERT_BATCH_SIZE));
+		batches.push(records.slice(start, start + UPSERT_BATCH_SIZE));
 	}
+	await mapWithLimit(batches, UPSERT_PARALLEL, (batch, i) =>
+		withRetry(() => ns.upsertRecords(batch), { label: `upsert batch ${i + 1}/${batches.length}` })
+	);
 	console.log(`${records.length} chunks indexed for paper "${title}"`);
 	return records.length;
 }

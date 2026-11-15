@@ -14,6 +14,8 @@ async function startApp() {
 	// tests use their own cutoff. (0.25, the default, was calibrated on the
 	// real llama-text-embed-v2 index.)
 	process.env.PAPER_MATCH_MIN_SCORE = '0.1';
+	// Retry back-off of 1 ms instead of seconds, so retry tests stay fast.
+	process.env.RETRY_BASE_DELAY_MS = '1';
 
 	const mongo = await MongoMemoryServer.create();
 	await mongoose.connect(mongo.getUri());

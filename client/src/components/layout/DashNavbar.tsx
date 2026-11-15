@@ -60,16 +60,24 @@ const DashNavbar: React.FC = () => {
 				body: formData,
 			});
 
+			// The server reports each file that failed: { filename, error }.
+			const json = await response.json().catch(() => ({}));
+			const failedList = (json.failed || [])
+				.map((f: { filename: string; error: string }) => `• ${f.filename}: ${f.error}`)
+				.join('\n');
+
 			if (!response.ok) {
-				const errJson = await response.json();
-				console.error('Upload failed:', errJson);
-				alert(`Upload error: ${errJson.error || response.statusText}`);
+				console.error('Upload failed:', json);
+				alert(`Upload error: ${json.error || response.statusText}${failedList ? `\n\n${failedList}` : ''}`);
 				return;
 			}
 
-			const json = await response.json();
-			console.log('Upload successful:', json);
-			alert('Paper(s) uploaded successfully!');
+			if (failedList) {
+				// 207: some files were stored, some were not.
+				alert(`Uploaded ${json.papers.length} paper(s), but some files failed:\n\n${failedList}`);
+			} else {
+				alert('Paper(s) uploaded successfully!');
+			}
 			window.location.reload();
 		} catch (err) {
 			console.error('Upload exception:', err);

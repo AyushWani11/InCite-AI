@@ -2,7 +2,6 @@ const express = require('express');
 const multer = require('multer');
 const { parsePdf } = require('../utils/pdf');
 const mongoose = require('mongoose');
-const { Readable } = require('stream');
 const { generateStructured, StructuredOutputError } = require('../utils/structured');
 const { generateFromFullPaper } = require('../utils/fullPaper');
 const {
@@ -82,88 +81,127 @@ router.post(
 			bucketName: 'papers',
 		});
 		const savedPapers = [];
+		const failed = []; // { filename, error, reason: 'unreadable' | 'indexing' }
 
 		for (const file of files) {
+			// 1. Read the PDF. A file that is not a readable PDF is reported,
+			//    not silently skipped.
+			let parsed;
 			try {
-				const parsed = await parsePdf(file.buffer);
-				const text = parsed.text;
+				parsed = await parsePdf(file.buffer);
+			} catch (err) {
+				failed.push({
+					filename: file.originalname,
+					reason: 'unreadable',
+					error: 'Not a readable PDF.',
+				});
+				continue;
+			}
+			const text = parsed.text;
+			const metadata = parsed.info || {};
 
-				const metadata = parsed.info || {};
-
-				// Authors and keywords from Gemini. Optional: if this fails, the
-				// upload still succeeds using the PDF's own metadata below.
-				let mlData = { authors: [], keywords: [] };
-				try {
-					mlData = await generateStructured({
-						prompt: buildMetadataPrompt(text),
-						schema: METADATA_SCHEMA,
-						label: 'authors/keywords',
-					});
-				} catch (err) {
-					console.warn('Author/keyword extraction failed, using PDF metadata:', err.message);
-				}
-
-				const authors =
-					Array.isArray(mlData.authors) && mlData.authors.length
-						? mlData.authors
-						: metadata.Author
-						? [metadata.Author]
-						: [];
-
-				const keywords =
-					Array.isArray(mlData.keywords) && mlData.keywords.length
-						? mlData.keywords
-						: metadata.Keywords
-						? metadata.Keywords.split(',').map((k) => k.trim())
-						: [];
-
-				const readStream = new Readable();
-				readStream.push(file.buffer);
-				readStream.push(null);
-
-				await new Promise((resolve, reject) => {
-					const uploadStream = bucket.openUploadStream(file.originalname, {
-						contentType: file.mimetype,
-						metadata: { uploadedBy: userId },
-					});
-
-					readStream
-						.pipe(uploadStream)
-						.on('error', reject)
-						.on('finish', async () => {
-							const paper = new Paper({
-								title: metadata.Title || file.originalname,
-								authors,
-								publicationDate: isValidDate(metadata.CreationDate)
-									? new Date(metadata.CreationDate)
-									: null,
-								keywords,
-								filename: uploadStream.filename,
-								fileId: uploadStream.id,
-								uploadedBy: userId,
-							});
-							await paper.save();
-
-							await addPaperChunks(
-								paper._id.toString(),
-								userId,
-								paper.title,
-								text
-							);
-
-							savedPapers.push(paper);
-
-							resolve();
-						});
+			// 2. Authors and keywords from Gemini. Optional: if this fails, the
+			//    upload still succeeds using the PDF's own metadata.
+			let mlData = { authors: [], keywords: [] };
+			try {
+				mlData = await generateStructured({
+					prompt: buildMetadataPrompt(text),
+					schema: METADATA_SCHEMA,
+					label: 'authors/keywords',
 				});
 			} catch (err) {
+				console.warn('Author/keyword extraction failed, using PDF metadata:', err.message);
+			}
+			const authors = mlData.authors.length ? mlData.authors : metadata.Author ? [metadata.Author] : [];
+			const keywords = mlData.keywords.length
+				? mlData.keywords
+				: metadata.Keywords
+					? metadata.Keywords.split(',').map((k) => k.trim())
+					: [];
+
+			// 3. Store the file, the record and the searchable chunks. Each step
+			//    is awaited inside this try, so any failure is caught here (it
+			//    used to escape from a stream event handler and crash the
+			//    server). If a step fails, whatever was already created is
+			//    removed again, so no half-indexed paper is left behind.
+			let fileId = null;
+			let paper = null;
+			try {
+				fileId = await storeFile(bucket, file, userId);
+				paper = await new Paper({
+					title: metadata.Title || file.originalname,
+					authors,
+					publicationDate: isValidDate(metadata.CreationDate) ? new Date(metadata.CreationDate) : null,
+					keywords,
+					filename: file.originalname,
+					fileId,
+					uploadedBy: userId,
+				}).save();
+				await addPaperChunks(paper._id.toString(), userId, paper.title, text);
+				savedPapers.push(paper);
+			} catch (err) {
 				console.error(`Upload failed for file ${file.originalname}:`, err);
+				await removePartialUpload({ bucket, fileId, paper, userId });
+				failed.push({
+					filename: file.originalname,
+					reason: 'indexing',
+					error: 'The paper could not be stored and indexed for search. Please try again.',
+				});
 			}
 		}
 
-		res.status(201).json({ msg: 'Upload complete', papers: savedPapers });
+		// Honest status: 201 all stored, 207 some stored, otherwise 422 if the
+		// files were unreadable or 502 if a backing service failed.
+		const failures = failed.map(({ filename, error }) => ({ filename, error }));
+		if (failed.length === 0) {
+			return res.status(201).json({ msg: 'Upload complete', papers: savedPapers, failed: [] });
+		}
+		if (savedPapers.length > 0) {
+			return res.status(207).json({
+				msg: 'Some files could not be uploaded',
+				papers: savedPapers,
+				failed: failures,
+			});
+		}
+		const status = failed.every((f) => f.reason === 'unreadable') ? 422 : 502;
+		return res.status(status).json({
+			error: 'None of the files could be uploaded.',
+			papers: [],
+			failed: failures,
+		});
 	}
 );
+
+// Write a file's bytes to GridFS; resolves with the new file's id.
+function storeFile(bucket, file, userId) {
+	return new Promise((resolve, reject) => {
+		const uploadStream = bucket.openUploadStream(file.originalname, {
+			contentType: file.mimetype,
+			metadata: { uploadedBy: userId },
+		});
+		uploadStream.once('error', reject);
+		uploadStream.once('finish', () => resolve(uploadStream.id));
+		uploadStream.end(file.buffer);
+	});
+}
+
+// Undo a failed upload: chunks, record and file. Each step is attempted even
+// if an earlier one fails. (Chat also ignores chunks of papers that no longer
+// exist, in case the chunk clean-up itself fails.)
+async function removePartialUpload({ bucket, fileId, paper, userId }) {
+	const steps = [
+		paper && (() => deleteVectorsByPaper(paper._id, userId)),
+		paper && (() => paper.deleteOne()),
+		fileId && (() => bucket.delete(fileId)),
+	].filter(Boolean);
+	for (const step of steps) {
+		try {
+			await step();
+		} catch (err) {
+			console.error('Clean-up after a failed upload did not complete:', err.message);
+		}
+	}
+}
 
 // Search papers
 router.get('/search', authLogin, async (req, res) => {

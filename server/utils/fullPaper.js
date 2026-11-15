@@ -11,6 +11,7 @@
 const { generateText } = require('./llm');
 const { generateStructured } = require('./structured');
 const { splitLongPiece } = require('./chunking');
+const { mapWithLimit } = require('./async');
 
 const SEGMENT_CHARS = 24000; // ~6k tokens per note-taking call
 const MAX_SEGMENTS = 8; // cap on note-taking calls per request
@@ -57,20 +58,6 @@ function splitIntoSegments(text, segmentChars = SEGMENT_CHARS, maxSegments = MAX
 		segments = packSegments(text, size);
 	}
 	return segments;
-}
-
-// Run fn over items with at most `limit` calls in flight; keeps order.
-async function mapWithLimit(items, limit, fn) {
-	const results = new Array(items.length);
-	let next = 0;
-	async function worker() {
-		while (next < items.length) {
-			const i = next++;
-			results[i] = await fn(items[i], i);
-		}
-	}
-	await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-	return results;
 }
 
 /**

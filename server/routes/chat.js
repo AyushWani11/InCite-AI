@@ -5,6 +5,7 @@ const { parsePdf } = require('../utils/pdf');
 const { streamText } = require('../utils/llm');
 const authLogin = require('../middleware/authToken');
 const ChatHistory = require('../models/chatlog.js');
+const mongoose = require('mongoose');
 const Paper = require('../models/paper');
 const { searchRelevantChunks } = require('../utils/vectorStore');
 const { findOwnedPaper, readPaperFile } = require('../utils/papers');
@@ -154,7 +155,18 @@ router.post('/', authLogin, upload.single('file'), async (req, res) => {
 					error: 'You have no papers uploaded. Please upload or select a paper first.',
 				});
 			}
-			const matches = await searchRelevantChunks(userQuestion, CANDIDATE_CHUNKS, null, req.user.id);
+			const found = await searchRelevantChunks(userQuestion, CANDIDATE_CHUNKS, null, req.user.id);
+			// Ignore chunks of papers that no longer exist (e.g. left over from
+			// a failed upload whose clean-up could not reach Pinecone).
+			const ids = [...new Set(found.map((m) => m.meta.paperId))].filter((id) =>
+				mongoose.isObjectIdOrHexString(id)
+			);
+			const existing = new Set(
+				(await Paper.find({ _id: { $in: ids }, uploadedBy: req.user.id }).select('_id')).map((p) =>
+					String(p._id)
+				)
+			);
+			const matches = found.filter((m) => existing.has(m.meta.paperId));
 			const { paper, best } = choosePaper(matches);
 			if (!paper) {
 				// Nothing relevant enough: say so rather than let the model guess.

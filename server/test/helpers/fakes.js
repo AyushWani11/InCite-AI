@@ -27,7 +27,10 @@ const state = {
 		namespaces: new Map(), // namespace -> Map(id -> record)
 		queries: [],
 		deletes: [],
-		upsertBatches: [], // { namespace, size } per upsertRecords call
+		upsertBatches: [], // { namespace, size } per successful upsertRecords call
+		upsertAttempts: 0, // every upsertRecords call, including failed ones
+		// (attemptNumber, records) => Error | null: simulate upsert failures
+		upsertFailure: null,
 		deleteFails: false, // simulate Pinecone being unavailable for deletes
 		// Real Pinecone may answer 404 for a namespace that has no records yet.
 		missingNamespaceThrows: false,
@@ -58,6 +61,8 @@ function reset() {
 	state.pinecone.queries = [];
 	state.pinecone.deletes = [];
 	state.pinecone.upsertBatches = [];
+	state.pinecone.upsertAttempts = 0;
+	state.pinecone.upsertFailure = () => null;
 	state.pinecone.deleteFails = false;
 	state.pinecone.missingNamespaceThrows = false;
 	state.pinecone.indexConfig = structuredClone(DEFAULT_INDEX_CONFIG);
@@ -217,6 +222,9 @@ function fakeNamespace(nsName) {
 			if (records.length > 96) {
 				throw new Error(`[fake pinecone] at most 96 records per upsertRecords call, got ${records.length}`);
 			}
+			const attempt = ++state.pinecone.upsertAttempts;
+			const failure = state.pinecone.upsertFailure(attempt, records);
+			if (failure) throw failure;
 			state.pinecone.upsertBatches.push({ namespace: nsName, size: records.length });
 			const store = namespaceStore(nsName);
 			for (const record of records) {
