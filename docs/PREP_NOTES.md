@@ -29,7 +29,7 @@ map-reduce, how many excerpts to retrieve) on real data instead of guessing.
 - Pinecone free tier: 5M embedding tokens a month; my whole library re-indexed
   for about 2% of that.
 - Chunk overlap costs ~20% more chunks.
-- Test suite: 110 tests, no API keys needed.
+- Test suite: 116 tests, no API keys needed.
 - Chat display: a demo answer took **10 s** to appear after the server had
   sent it (20 ms per character); now **0.1 s**.
 - Button contrast: white on teal-500 **2.5:1** (fails WCAG's 4.5:1); teal-700
@@ -420,11 +420,43 @@ chat, summary, assessment, delete and logout.
 - A failed paper-list load showed the error and "No papers uploaded yet" at
   the same time.
 
+## Phase 8: chat history
+
+### 32. Saving chat history never worked
+- **What was wrong:** two bugs, each enough on its own. A middleware for
+  this route called `JSON.parse(req.body)`, but the app-wide JSON parser had
+  already turned the client's JSON into an object, so every save got a 400
+  (and it ran before the login check, so logged-out requests got 400 instead
+  of 401). Behind that, the database only allowed the roles `user` and
+  `vega` (the app's old name), while the client sends `user` and
+  `assistant`, so even a parsable body would have failed with a 500.
+- **In 30 seconds:** "I wrote the tests first and watched them fail with
+  exactly those errors. The route now accepts JSON, or the same JSON as
+  `text/plain`, validates the messages, and the roles match what the chat
+  already uses. An optional client-chosen session id turns saving into an
+  upsert, so saving the same conversation twice updates it instead of
+  duplicating it. Then I closed a tab in headless Chrome against a
+  cross-origin, production-mode setup and checked the conversation arrived."
+- **Follow-up:** *Why accept `text/plain` at all?* A JSON POST to another
+  site needs a CORS preflight; `text/plain` is a "simple" request that
+  doesn't. That matters for requests sent while a page is closing
+  (`sendBeacon` only sends simple types without a preflight). Chrome handled
+  the preflighted JSON save in my test, but accepting both keeps the client
+  free to switch.
+- **Follow-up:** *Could someone overwrite another user's conversation by
+  guessing its session id?* No: the upsert's filter is (user id, session
+  id), so the same id from another user creates or updates their own
+  document. There's a test for exactly that, and a unique index on the pair
+  stops two concurrent saves from creating duplicates.
+
 ---
 
 ## What I'd still change (say this before they ask)
 
-- Fix chat-history saving, add upload size limits and rate limiting.
+- Show saved conversations in the app, and also save when leaving the
+  dashboard inside the app and on `pagehide` (phones often skip
+  `beforeunload`).
+- Add upload size limits and rate limiting.
 - Remove unused dependencies and work through the `npm audit` findings.
 - Turn the Puppeteer checks into real browser tests in the repo (sources,
   upload messages, the phone layout), since the server tests don't cover the
