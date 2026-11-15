@@ -3,20 +3,10 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { check, validationResult } = require('express-validator');
-const mongoose = require('mongoose');
 const User = require('../models/user'); // User model
 const authLogin = require('../middleware/authToken');
 
 const JWT_SECRET = require('../utils/jwtSecret');
-
-// Connect to MongoDB
-mongoose
-	.connect(process.env.MONGODB_URI, {
-		useNewUrlParser: true,
-		useUnifiedTopology: true,
-	})
-	.then(() => console.log('MongoDB connected'))
-	.catch((err) => console.error('MongoDB connection error:', err));
 
 // Routes
 

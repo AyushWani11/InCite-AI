@@ -28,5 +28,11 @@
     "pdf-parse": "^1.1.1",
     "stream": "^0.0.3",
     "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "mongodb-memory-server": "^10.4.3"
+  },
+  "scripts": {
+    "test": "node --test test/**/*.test.js"
   }
 }
