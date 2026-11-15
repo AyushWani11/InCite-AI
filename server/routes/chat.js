@@ -1,33 +1,68 @@
 const express = require('express');
 const fs = require('fs').promises;
 const multer = require('multer');
-const pdfParse = require('pdf-parse');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { parsePdf } = require('../utils/pdf');
+const { streamText } = require('../utils/llm');
 const authLogin = require('../middleware/authToken');
-const mongoose = require('mongoose');
 const ChatHistory = require('../models/chatlog.js');
+const mongoose = require('mongoose');
+const Paper = require('../models/paper');
 const { searchRelevantChunks } = require('../utils/vectorStore');
+const { findOwnedPaper, readPaperFile } = require('../utils/papers');
+const { choosePaper } = require('../utils/paperSelection');
 require('dotenv').config();
 
-const router = express.Router();
-const upload = multer({ dest: 'uploads/' });
+// A selected paper up to this many characters (~25k tokens) is given to the
+// model in full; longer ones are searched for the most relevant chunks.
+function fullTextMaxChars() {
+	return Number(process.env.CHAT_FULL_TEXT_MAX_CHARS) || 100000;
+}
+// How many chunks (excerpts of at most 400 characters) an answer gets.
+// Default 8: measured on real papers, the top 4 covered narrow factual
+// questions, but for "explain" / "walk me through" questions ranks 5-8 still
+// held relevant passages; 4 more excerpts cost only ~400 tokens.
+const DEFAULT_TOP_K = 8;
+function chunksPerAnswer() {
+	const k = Number.parseInt(process.env.RETRIEVAL_TOP_K, 10);
+	return k >= 1 && k <= 20 ? k : DEFAULT_TOP_K;
+}
+// Without a selected paper, this many chunks are compared to pick the paper.
+const CANDIDATE_CHUNKS = 20;
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+const NOT_FOUND_REPLY =
+	"I couldn't find anything about that in your papers. Try selecting a paper, " +
+	'or rephrase your question.';
+
+const formatChunks = (chunks) =>
+	chunks.map((c, i) => `Excerpt ${i + 1}:\n${c.text}`).join('\n\n');
+
+// A source entry for an answer built from some of a paper's chunks:
+// which paper, and which chunks (by position in the paper), in order.
+const excerptSource = (paperId, title, chunks) => ({
+	paperId: String(paperId),
+	title,
+	scope: 'excerpts',
+	excerpts: [...new Set(chunks.map((c) => c.meta.chunkIndex))].sort((a, b) => a - b),
+});
+
+const router = express.Router();
+// defParamCharset: browsers send filenames as UTF-8; multer 2 assumes latin1.
+const upload = multer({ dest: 'uploads/', defParamCharset: 'utf8' });
+
 const generationConfig = {
 	temperature: 0.3,
 	topP: 0.95,
 	topK: 64,
 	maxOutputTokens: 8192,
-	responseMimeType: 'text/plain',
 };
 
 router.post('/', authLogin, upload.single('file'), async (req, res) => {
 	const userQuestion = req.body.question;
 	let chatHistory = req.body.history || '[]';
 	let fileContent = '';
+	// The selected paper's MongoDB _id (not its title, which is not unique and
+	// may come from the PDF's own metadata rather than the filename).
 	let paperId = req.body.paperId;
-	console.log('paperId:', req.body);
 
 	if (paperId && typeof paperId === 'object') {
 		// Handle case where paperId is an object with null prototype
@@ -41,10 +76,6 @@ router.post('/', authLogin, upload.single('file'), async (req, res) => {
 
 	// Ensure paperId is a string or null
 	paperId = paperId ? String(paperId).trim() : null;
-
-	console.log('Processed paperId:', paperId, typeof paperId);
-
-	// If paperId is provided but no file, fetch from GridFS
 
 	// Parse and validate chatHistory
 	try {
@@ -104,116 +135,84 @@ router.post('/', authLogin, upload.single('file'), async (req, res) => {
 	}
 
 	try {
-		// File processing remains the same...
+		let context = '';
+		let sourceLabel = 'uploaded file';
+		// What the answer is based on, sent to the client in X-Sources.
+		let sources = [];
+
 		if (req.file) {
+			// 1. A file attached to this message: answer from it.
 			if (req.file.mimetype === 'application/pdf') {
 				const buffer = await fs.readFile(req.file.path);
-				const parsed = await pdfParse(buffer);
+				const parsed = await parsePdf(buffer);
 				fileContent = parsed.text;
 			} else {
 				fileContent = await fs.readFile(req.file.path, 'utf-8');
 			}
 			await fs.unlink(req.file.path);
-		}
-
-		if (paperId && !req.file) {
-			try {
-				const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
-					bucketName: 'papers',
-				});
-
-				const chunks = [];
-				const stream = bucket.openDownloadStreamByName(paperId);
-
-				for await (const chunk of stream) {
-					chunks.push(chunk);
-				}
-
-				const buffer = Buffer.concat(chunks);
-				const parsed = await pdfParse(buffer);
-				fileContent = parsed.text;
-
-				console.log('Successfully loaded paper from GridFS');
-			} catch (gridError) {
-				console.warn(
-					'Could not fetch paper from GridFS, using vector search:',
-					gridError
-				);
-			}
-		}
-
-		let context = '';
-		let sourceLabel = 'uploaded file';
-
-		if (!fileContent) {
-			const Paper = require('../models/paper');
-
-			let inferredPaperId = paperId;
-
-			if (!paperId) {
-				const userPapers = await Paper.find({ uploadedBy: req.user.id }).select(
-					'title _id'
-				);
-
-				if (userPapers.length === 0) {
-					return res.status(400).json({
-						error:
-							'You have no papers uploaded. Please upload or select a paper first.',
-					});
-				}
-
-				console.log('📄 User papers:', userPapers);
-
-				const titleList = userPapers
-					.map((p, idx) => `${idx + 1}. ${p.title}`)
-					.join('\n');
-
-				const disambiguationPrompt = `
-You are an intelligent research assistant. Based on the user's question, choose the most relevant paper from the list.
-
-User Question: "${userQuestion}"
-
-Paper Titles:
-${titleList}
-
-Return ONLY the index of the most relevant paper.
-`;
-
-				const result = await model.generateContent(disambiguationPrompt);
-				const answerText = result.response.text().trim();
-
-				const selectedIndex =
-					parseInt(answerText.match(/\d+/)?.[0] || '-1', 10) - 1;
-
-				if (selectedIndex >= 0 && selectedIndex < userPapers.length) {
-					inferredPaperId = userPapers[selectedIndex]._id.toString();
-					console.log('📘 Inferred paper:', userPapers[selectedIndex].title);
-				} else {
-					console.warn(
-						'⚠️ Could not confidently infer paper, falling back to all chunks.'
-					);
-				}
-			}
-
-			const topChunks = await searchRelevantChunks(
-				userQuestion,
-				4,
-				inferredPaperId,
-				req.user.id
-			);
-			if (!topChunks.length) {
-				return res
-					.status(404)
-					.json({ error: 'No relevant paper content found.' });
-			}
-			context = topChunks
-				.map((c, i) => `Chunk ${i + 1} (from "${c.meta.title}"):\n${c.text}`)
-				.join('\n\n');
-			sourceLabel = inferredPaperId
-				? topChunks[0].meta.title
-				: 'best-matched paper';
-		} else {
 			context = fileContent;
+			sources = [{ title: req.file.originalname, scope: 'attached file' }];
+		} else if (paperId) {
+			// 2. A selected paper, identified by its _id and checked for ownership.
+			const paper = await findOwnedPaper(paperId, req.user.id);
+			if (!paper) return res.status(404).json({ error: 'Paper not found.' });
+			sourceLabel = paper.title;
+
+			const pdf = await readPaperFile(paper);
+			const text = pdf ? (await parsePdf(pdf)).text : '';
+			const id = String(paper._id);
+			if (text && text.length <= fullTextMaxChars()) {
+				// Short enough: the model reads the whole paper.
+				context = text;
+				sources = [{ paperId: id, title: paper.title, scope: 'full text' }];
+			} else {
+				// Too long: only its chunks most relevant to the question.
+				const chunks = await searchRelevantChunks(userQuestion, chunksPerAnswer(), paper._id, req.user.id);
+				if (chunks.length) {
+					context = formatChunks(chunks);
+					sources = [excerptSource(id, paper.title, chunks)];
+				} else {
+					context = text.slice(0, fullTextMaxChars());
+					sources = [{ paperId: id, title: paper.title, scope: 'beginning of the paper' }];
+				}
+			}
+		} else {
+			// 3. No paper selected: find the paper the question is about.
+			if (!(await Paper.exists({ uploadedBy: req.user.id }))) {
+				return res.status(400).json({
+					error: 'You have no papers uploaded. Please upload or select a paper first.',
+				});
+			}
+			const found = await searchRelevantChunks(userQuestion, CANDIDATE_CHUNKS, null, req.user.id);
+			// Ignore chunks of papers that no longer exist (e.g. left over from
+			// a failed upload whose clean-up could not reach Pinecone).
+			const ids = [...new Set(found.map((m) => m.meta.paperId))].filter((id) =>
+				mongoose.isObjectIdOrHexString(id)
+			);
+			const existing = new Set(
+				(await Paper.find({ _id: { $in: ids }, uploadedBy: req.user.id }).select('_id')).map((p) =>
+					String(p._id)
+				)
+			);
+			const matches = found.filter((m) => existing.has(m.meta.paperId));
+			const { paper, best } = choosePaper(matches);
+			if (!paper) {
+				// Nothing relevant enough: say so rather than let the model guess.
+				console.log(`No paper matched the question (best chunk score: ${best ?? 'none'})`);
+				res.setHeader('Content-Type', 'text/plain');
+				return res.send(NOT_FOUND_REPLY);
+			}
+			console.log(`Chose "${paper.title}" (top-3 average ${paper.score.toFixed(3)}, best chunk ${best.toFixed(3)})`);
+			sourceLabel = paper.title;
+			// The chosen paper's best chunks among the candidates; if other
+			// papers took too many candidate slots, search within it for more.
+			const k = chunksPerAnswer();
+			const chunks =
+				paper.chunks.length >= k
+					? paper.chunks.slice(0, k)
+					: await searchRelevantChunks(userQuestion, k, paper.paperId, req.user.id);
+			context = formatChunks(chunks);
+			sources = [excerptSource(paper.paperId, paper.title, chunks)];
 		}
 
 		if (!context || context.trim().length < 20) {
@@ -223,8 +222,11 @@ Return ONLY the index of the most relevant paper.
 			});
 		}
 
-		// Use validated history instead of raw chatHistory
-		const promptHistory = [
+		// Earlier turns, then one new user turn that carries the context and
+		// the question. Gemini expects user and model turns to alternate, so
+		// drop a trailing user turn (e.g. a question whose answer failed).
+		while (validatedHistory.at(-1)?.role === 'user') validatedHistory.pop();
+		const contents = [
 			...validatedHistory,
 			{
 				role: 'user',
@@ -244,22 +246,25 @@ ${context}`,
 			},
 		];
 
-		const chatSession = model.startChat({
-			generationConfig,
-			history: promptHistory,
-		});
-
-		const result = await chatSession.sendMessageStream(userQuestion);
+		// Throws here (before anything is sent) if Gemini rejects the request.
+		const reply = await streamText(contents, generationConfig);
 
 		res.setHeader('Content-Type', 'text/plain');
 		res.setHeader('Transfer-Encoding', 'chunked');
+		// The answer is streamed as plain text, so its sources travel in a
+		// header, sent before the first word. Header values must be ASCII, so
+		// the JSON is URL-encoded (titles can contain any character).
+		res.setHeader('X-Sources', encodeURIComponent(JSON.stringify(sources)));
 
-		for await (const chunk of result.stream) {
-			res.write(chunk.text());
+		for await (const piece of reply) {
+			res.write(piece);
 		}
 		res.end();
 	} catch (error) {
 		console.error('Chat error:', error);
+		// If part of the answer was already streamed, the status can no longer
+		// change; just end the response. (Setting it would throw again.)
+		if (res.headersSent) return res.end();
 		res.status(500).json({ error: 'AI generation failed.' });
 	}
 });

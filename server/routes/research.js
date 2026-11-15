@@ -1,22 +1,62 @@
 const express = require('express');
 const multer = require('multer');
-const pdfParse = require('pdf-parse');
+const { parsePdf } = require('../utils/pdf');
 const mongoose = require('mongoose');
-const { Readable } = require('stream');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { generateStructured, StructuredOutputError } = require('../utils/structured');
+const { generateFromFullPaper } = require('../utils/fullPaper');
+const {
+	buildMetadataPrompt,
+	summaryPrompts,
+	assessmentPrompts,
+} = require('../utils/prompts');
+const {
+	SUMMARY_SCHEMA,
+	ASSESSMENT_SCHEMA,
+	METADATA_SCHEMA,
+} = require('../utils/schemas');
 const authLogin = require('../middleware/authToken');
 const Paper = require('../models/paper');
-const { addPaperChunks } = require('../utils/vectorStore');
-const { deleteVectorsByUser } = require('../utils/vectorStore');
-const { deleteVectorsByPaper } = require('../utils/vectorStore');
+const {
+	findOwnedPaper,
+	findPaperFile,
+	openFileStream,
+	readPaperFile,
+	deletePaperFile,
+} = require('../utils/papers');
+const {
+	addPaperChunks,
+	deleteVectorsByUser,
+	deleteVectorsByPaper,
+} = require('../utils/vectorStore');
 
 require('dotenv').config();
 
 const router = express.Router();
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({
+	storage: multer.memoryStorage(),
+	// Browsers send filenames as UTF-8; multer 2 assumes latin1 by default,
+	// which garbles names like "résumé.pdf".
+	defParamCharset: 'utf8',
+});
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+// The paper's text, or null after answering 422 if the PDF has none
+// (e.g. a scanned image without a text layer).
+function textOrReject(res, text) {
+	if (text && text.trim()) return text;
+	res.status(422).json({
+		error: 'This PDF has no extractable text (it may be a scanned image), so it cannot be analysed.',
+	});
+	return null;
+}
+
+// A reply from Gemini we could not use even after one retry: answer 502
+// ("bad gateway": the upstream service misbehaved) with a helpful message.
+function sendUnusableAiReply(res, what, err) {
+	return res.status(502).json({
+		error: `The AI returned a ${what} we could not use, even after retrying. Please try again in a moment.`,
+		details: err.problem,
+	});
+}
 
 // Helper
 function isValidDate(date) {
@@ -41,106 +81,133 @@ router.post(
 			bucketName: 'papers',
 		});
 		const savedPapers = [];
+		const failed = []; // { filename, error, reason: 'unreadable' | 'indexing' }
 
 		for (const file of files) {
+			// 1. Read the PDF. A file that is not a readable PDF is reported,
+			//    not silently skipped.
+			let parsed;
 			try {
-				const parsed = await pdfParse(file.buffer);
-				const text = parsed.text;
+				parsed = await parsePdf(file.buffer);
+			} catch (err) {
+				failed.push({
+					filename: file.originalname,
+					reason: 'unreadable',
+					error: 'Not a readable PDF.',
+				});
+				continue;
+			}
+			const text = parsed.text;
+			const metadata = parsed.info || {};
 
-				const metadata = parsed.info || {};
-
-				// ✨ ML extraction
-				let mlData = { authors: [], keywords: [] };
-				try {
-					let prompt = `
-You are an academic assistant. From the following research paper text, extract:
-1. A list of author names.
-2. A list of 5–10 keywords summarizing the paper.
-
-Respond ONLY in JSON format:
-{
-  "authors": [...],
-  "keywords": [...]
-}
-
-Text:
-${text.substring(0, 6000)}
-				`;
-
-					const result = await model.generateContent(prompt);
-					let jsonText = result.response.text().trim();
-					if (jsonText.startsWith('```'))
-						jsonText = jsonText.replace(/```json|```/g, '').trim();
-					mlData = JSON.parse(jsonText);
-				} catch (err) {
-					console.warn('Gemini ML extraction failed:', err);
-				}
-
-				const authors =
-					Array.isArray(mlData.authors) && mlData.authors.length
-						? mlData.authors
-						: metadata.Author
-						? [metadata.Author]
-						: [];
-
-				const keywords =
-					Array.isArray(mlData.keywords) && mlData.keywords.length
-						? mlData.keywords
-						: metadata.Keywords
-						? metadata.Keywords.split(',').map((k) => k.trim())
-						: [];
-
-				const readStream = new Readable();
-				readStream.push(file.buffer);
-				readStream.push(null);
-
-				await new Promise((resolve, reject) => {
-					const uploadStream = bucket.openUploadStream(file.originalname, {
-						contentType: file.mimetype,
-						metadata: { uploadedBy: userId },
-					});
-
-					readStream
-						.pipe(uploadStream)
-						.on('error', reject)
-						.on('finish', async () => {
-							const paper = new Paper({
-								title: metadata.Title || file.originalname,
-								authors,
-								publicationDate: isValidDate(metadata.CreationDate)
-									? new Date(metadata.CreationDate)
-									: null,
-								keywords,
-								filename: uploadStream.filename,
-								uploadedBy: userId,
-							});
-							await paper.save();
-
-							await addPaperChunks(
-								paper._id.toString(),
-								userId,
-								paper.title,
-								text
-							);
-
-							savedPapers.push(paper);
-
-							resolve();
-						});
+			// 2. Authors and keywords from Gemini. Optional: if this fails, the
+			//    upload still succeeds using the PDF's own metadata.
+			let mlData = { authors: [], keywords: [] };
+			try {
+				mlData = await generateStructured({
+					prompt: buildMetadataPrompt(text),
+					schema: METADATA_SCHEMA,
+					label: 'authors/keywords',
 				});
 			} catch (err) {
+				console.warn('Author/keyword extraction failed, using PDF metadata:', err.message);
+			}
+			const authors = mlData.authors.length ? mlData.authors : metadata.Author ? [metadata.Author] : [];
+			const keywords = mlData.keywords.length
+				? mlData.keywords
+				: metadata.Keywords
+					? metadata.Keywords.split(',').map((k) => k.trim())
+					: [];
+
+			// 3. Store the file, the record and the searchable chunks. Each step
+			//    is awaited inside this try, so any failure is caught here (it
+			//    used to escape from a stream event handler and crash the
+			//    server). If a step fails, whatever was already created is
+			//    removed again, so no half-indexed paper is left behind.
+			let fileId = null;
+			let paper = null;
+			try {
+				fileId = await storeFile(bucket, file, userId);
+				paper = await new Paper({
+					title: metadata.Title || file.originalname,
+					authors,
+					publicationDate: isValidDate(metadata.CreationDate) ? new Date(metadata.CreationDate) : null,
+					keywords,
+					filename: file.originalname,
+					fileId,
+					uploadedBy: userId,
+				}).save();
+				await addPaperChunks(paper._id.toString(), userId, paper.title, text);
+				savedPapers.push(paper);
+			} catch (err) {
 				console.error(`Upload failed for file ${file.originalname}:`, err);
+				await removePartialUpload({ bucket, fileId, paper, userId });
+				failed.push({
+					filename: file.originalname,
+					reason: 'indexing',
+					error: 'The paper could not be stored and indexed for search. Please try again.',
+				});
 			}
 		}
 
-		res.status(201).json({ msg: 'Upload complete', papers: savedPapers });
+		// Honest status: 201 all stored, 207 some stored, otherwise 422 if the
+		// files were unreadable or 502 if a backing service failed.
+		const failures = failed.map(({ filename, error }) => ({ filename, error }));
+		if (failed.length === 0) {
+			return res.status(201).json({ msg: 'Upload complete', papers: savedPapers, failed: [] });
+		}
+		if (savedPapers.length > 0) {
+			return res.status(207).json({
+				msg: 'Some files could not be uploaded',
+				papers: savedPapers,
+				failed: failures,
+			});
+		}
+		const status = failed.every((f) => f.reason === 'unreadable') ? 422 : 502;
+		return res.status(status).json({
+			error: 'None of the files could be uploaded.',
+			papers: [],
+			failed: failures,
+		});
 	}
 );
 
+// Write a file's bytes to GridFS; resolves with the new file's id.
+function storeFile(bucket, file, userId) {
+	return new Promise((resolve, reject) => {
+		const uploadStream = bucket.openUploadStream(file.originalname, {
+			contentType: file.mimetype,
+			metadata: { uploadedBy: userId },
+		});
+		uploadStream.once('error', reject);
+		uploadStream.once('finish', () => resolve(uploadStream.id));
+		uploadStream.end(file.buffer);
+	});
+}
+
+// Undo a failed upload: chunks, record and file. Each step is attempted even
+// if an earlier one fails. (Chat also ignores chunks of papers that no longer
+// exist, in case the chunk clean-up itself fails.)
+async function removePartialUpload({ bucket, fileId, paper, userId }) {
+	const steps = [
+		paper && (() => deleteVectorsByPaper(paper._id, userId)),
+		paper && (() => paper.deleteOne()),
+		fileId && (() => bucket.delete(fileId)),
+	].filter(Boolean);
+	for (const step of steps) {
+		try {
+			await step();
+		} catch (err) {
+			console.error('Clean-up after a failed upload did not complete:', err.message);
+		}
+	}
+}
+
 // Search papers
 router.get('/search', authLogin, async (req, res) => {
-	const { title, author, keyword, fromDate, toDate, uploadedBy } = req.query;
-	const query = {};
+	const { title, author, keyword, fromDate, toDate } = req.query;
+	// Always limited to the caller's own papers.
+	const query = { uploadedBy: req.user.id };
 
 	if (title) query.title = { $regex: title, $options: 'i' };
 	if (author) query.authors = { $elemMatch: { $regex: author, $options: 'i' } };
@@ -150,7 +217,6 @@ router.get('/search', authLogin, async (req, res) => {
 		if (fromDate) query.publicationDate.$gte = new Date(fromDate);
 		if (toDate) query.publicationDate.$lte = new Date(toDate);
 	}
-	if (uploadedBy) query.uploadedBy = uploadedBy;
 
 	try {
 		const papers = await Paper.find(query).sort({ createdAt: -1 });
@@ -161,70 +227,52 @@ router.get('/search', authLogin, async (req, res) => {
 	}
 });
 
-// Download paper
-router.get('/download/:filename', async (req, res) => {
+// Download (or view inline) one of your own papers, by paper id.
+router.get('/download/:paperId', authLogin, async (req, res) => {
 	try {
-		const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
-			bucketName: 'papers',
-		});
-		const stream = bucket.openDownloadStreamByName(req.params.filename);
+		const paper = await findOwnedPaper(req.params.paperId, req.user.id);
+		const file = paper && (await findPaperFile(paper));
+		if (!file) return res.status(404).json({ error: 'File not found' });
+
 		res.set('Content-Type', 'application/pdf');
 		res.set('Content-Disposition', 'inline');
-		stream
-			.pipe(res)
-			.on('error', () => res.status(404).json({ error: 'File not found' }));
+		res.set('Content-Length', String(file.length));
+
+		// Listen for errors on the file stream itself. An unhandled stream
+		// error is an uncaught exception, which would stop the whole server.
+		openFileStream(file)
+			.on('error', (err) => {
+				console.error('Download stream failed:', err);
+				if (!res.headersSent) res.status(500).json({ error: 'Download failed' });
+				else res.destroy(err);
+			})
+			.pipe(res);
 	} catch (err) {
-		console.error(err);
-		res.status(500).json({ error: 'Download failed' });
+		console.error('Download failed:', err);
+		if (!res.headersSent) res.status(500).json({ error: 'Download failed' });
 	}
 });
 
-const buildSummaryPrompt = (text) => `
-You are an expert academic summarizer. Given a research paper, generate a structured JSON summary that captures both depth and clarity.
-
-Return exactly this JSON format:
-{
-  "summary": "Concise, well-written abstract of the paper.",
-  "contributions": ["Each point must describe a novel or impactful contribution clearly."],
-  "methodology": "Explain in detail the techniques, models, or frameworks used. Include dataset, architecture, or mathematical tools if relevant.",
-  "findings": "List the concrete results. Include comparisons, metrics, or evidence supporting the claims.",
-  "conclusion": "Summarize the takeaway of the paper and what future work it enables."
-}
-
-Text:
-${text.substring(0, 7000)}
-`;
-
 router.post('/summarize/:paperId', authLogin, async (req, res) => {
 	try {
-		const paper = await Paper.findById(req.params.paperId);
+		const paper = await findOwnedPaper(req.params.paperId, req.user.id);
 		if (!paper) return res.status(404).json({ error: 'Paper not found' });
 
-		const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
-			bucketName: 'papers',
-		});
-		const chunks = [];
-
-		await new Promise((resolve, reject) => {
-			bucket
-				.openDownloadStreamByName(paper.filename)
-				.on('data', (chunk) => chunks.push(chunk))
-				.on('end', resolve)
-				.on('error', reject);
-		});
-
-		const fullText = (await pdfParse(Buffer.concat(chunks))).text;
-		const prompt = buildSummaryPrompt(fullText);
-
-		const result = await model.generateContent(prompt);
-		let jsonText = result.response.text().trim();
-
-		// remove markdown code fences
-		if (jsonText.startsWith('```')) {
-			jsonText = jsonText.replace(/```json|```/g, '').trim();
+		const pdfBuffer = await readPaperFile(paper);
+		if (!pdfBuffer) {
+			return res.status(404).json({ error: 'Paper file not found' });
 		}
 
-		const summary = JSON.parse(jsonText);
+		const fullText = textOrReject(res, (await parsePdf(pdfBuffer)).text);
+		if (fullText === null) return;
+
+		// Only a reply that passes the schema check is saved.
+		const summary = await generateFromFullPaper({
+			text: fullText,
+			schema: SUMMARY_SCHEMA,
+			label: 'summary',
+			prompts: summaryPrompts,
+		});
 		paper.summary = summary;
 		await paper.save();
 
@@ -233,6 +281,7 @@ router.post('/summarize/:paperId', authLogin, async (req, res) => {
 			summary,
 		});
 	} catch (err) {
+		if (err instanceof StructuredOutputError) return sendUnusableAiReply(res, 'summary', err);
 		console.error('Summarization failed:', err);
 		res.status(500).json({ error: 'Summarization failed' });
 	}
@@ -240,7 +289,7 @@ router.post('/summarize/:paperId', authLogin, async (req, res) => {
 
 router.get('/summary/:paperId', authLogin, async (req, res) => {
 	try {
-		const paper = await Paper.findById(req.params.paperId);
+		const paper = await findOwnedPaper(req.params.paperId, req.user.id);
 		if (!paper?.summary)
 			return res.status(404).json({ error: 'Summary not found' });
 		res.status(200).json({ summary: paper.summary });
@@ -254,28 +303,19 @@ router.delete('/delete-all', authLogin, async (req, res) => {
 	try {
 		const userId = req.user.id;
 
-		// Optionally only delete user-uploaded papers:
 		const papers = await Paper.find({ uploadedBy: userId });
 
-		const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
-			bucketName: 'papers',
-		});
+		// Searchable chunks first: if this fails, nothing else has been
+		// deleted yet and the user can simply retry.
+		await deleteVectorsByUser(userId);
 
-		// Delete all files in GridFS by matching filenames
+		// Delete each paper's own stored file (never by filename alone, which
+		// other users may share).
 		for (const paper of papers) {
-			const files = await mongoose.connection.db
-				.collection('papers.files')
-				.find({ filename: paper.filename })
-				.toArray();
-
-			for (const file of files) {
-				await bucket.delete(file._id);
-			}
+			await deletePaperFile(paper);
 		}
 
 		await Paper.deleteMany({ uploadedBy: userId });
-
-		await deleteVectorsByUser(userId);
 
 		res.status(200).json({ msg: 'All your papers have been deleted' });
 	} catch (err) {
@@ -286,111 +326,50 @@ router.delete('/delete-all', authLogin, async (req, res) => {
 
 router.delete('/delete/:id', authLogin, async (req, res) => {
 	try {
-		const paper = await Paper.findById(req.params.id);
+		const paper = await findOwnedPaper(req.params.id, req.user.id);
 		if (!paper) return res.status(404).json({ error: 'Paper not found' });
 
-		const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
-			bucketName: 'papers',
-		});
-		const files = await mongoose.connection.db
-			.collection('papers.files')
-			.find({ filename: paper.filename })
-			.toArray();
-
-		for (const file of files) await bucket.delete(file._id);
-		await Paper.findByIdAndDelete(req.params.id);
-
-		// await deleteVectorsByPaper(
-		// 	paper._id.toString(),
-		// 	paper.uploadedBy.toString()
-		// );
+		// Searchable chunks first: if this fails, the paper is untouched and
+		// the user can retry, instead of a "deleted" paper that chat can
+		// still quote.
+		await deleteVectorsByPaper(paper._id, paper.uploadedBy);
+		await deletePaperFile(paper);
+		await paper.deleteOne();
 
 		res.status(200).json({ msg: 'Paper deleted' });
-
-		deleteVectorsByPaper(
-			paper._id.toString(),
-			paper.uploadedBy.toString()
-		).catch((err) => console.error('❌ Vector deletion failed:', err));
 	} catch (err) {
-		console.error('❌ Delete route failed:', err);
-		if (!res.headersSent) {
-			res.status(500).json({ error: 'Deletion failed' });
-		}
+		console.error('Delete route failed:', err);
+		res.status(500).json({ error: 'Deletion failed' });
 	}
 });
 
 router.post('/assess/:paperId', authLogin, async (req, res) => {
 	try {
-		const paper = await Paper.findById(req.params.paperId);
+		const paper = await findOwnedPaper(req.params.paperId, req.user.id);
 		if (!paper) return res.status(404).json({ error: 'Paper not found' });
 
-		const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
-			bucketName: 'papers',
-		});
-
-		const chunks = [];
-		await new Promise((resolve, reject) => {
-			bucket
-				.openDownloadStreamByName(paper.filename)
-				.on('data', (chunk) => chunks.push(chunk))
-				.on('end', resolve)
-				.on('error', reject);
-		});
-
-		const text = (await pdfParse(Buffer.concat(chunks))).text;
-
-		const prompt = `
-You are an academic reasearch paper reviewer who focuses more on content. assume none of the figures are missing.
-
-Analyze the following research paper and return a JSON object with the following structure:
-
-{
-  "score": {
-    "writingQuality": "Excellent | Good | Average | Poor",
-    "methodology": "Excellent | Good | Average | Poor",
-    "academicStandards": "Excellent | Good | Average | Poor",
-    "overallScore": 0 // integer from 0 to 100
-  },
-  "feedback": {
-    "writing": "Comments on clarity, grammar, organization, tone.",
-    "methodology": "Comments on methods, experiments, limitations.",
-    "standards": "Comments on formatting, citations, references, compliance."
-  },
-  "improvementSuggestions": [
-    "Specific, actionable recommendation 1",
-    "Specific, actionable recommendation 2"
-  ],
-  "issues": [
-    "Flag citation gaps, statistical problems, etc."
-  ]
-  "X-Factor": "Unique insights, creativity, or impact of the research." 
-}
-
-Be sure the overallScore is between 0 and 100 and reflects a fair average based on the 3 category scores.
-
-Text:
-${text.substring(0, 10000)}
-`;
-
-		const result = await model.generateContent(prompt);
-		let responseText = result.response.text().trim();
-
-		if (responseText.startsWith('```')) {
-			responseText = responseText.replace(/```json|```/g, '').trim();
+		const pdfBuffer = await readPaperFile(paper);
+		if (!pdfBuffer) {
+			return res.status(404).json({ error: 'Paper file not found' });
 		}
 
-		let assessment;
-		try {
-			assessment = JSON.parse(responseText);
-			paper.assessment = assessment;
-			await paper.save();
-		} catch (e) {
-			console.warn('Gemini returned malformed JSON:', responseText);
-			return res.status(500).json({ error: 'Failed to parse Gemini response' });
-		}
+		const text = textOrReject(res, (await parsePdf(pdfBuffer)).text);
+		if (text === null) return;
+
+		// Only a reply that passes the schema check is saved (the client
+		// crashes on an assessment without e.g. score.overallScore).
+		const assessment = await generateFromFullPaper({
+			text,
+			schema: ASSESSMENT_SCHEMA,
+			label: 'assessment',
+			prompts: assessmentPrompts,
+		});
+		paper.assessment = assessment;
+		await paper.save();
 
 		res.status(200).json({ assessment });
 	} catch (err) {
+		if (err instanceof StructuredOutputError) return sendUnusableAiReply(res, 'assessment', err);
 		console.error('Assessment error:', err);
 		res.status(500).json({ error: 'Assessment failed' });
 	}
@@ -398,7 +377,7 @@ ${text.substring(0, 10000)}
 
 router.get('/assessment/:paperId', authLogin, async (req, res) => {
 	try {
-		const paper = await Paper.findById(req.params.paperId);
+		const paper = await findOwnedPaper(req.params.paperId, req.user.id);
 		if (!paper?.assessment)
 			return res.status(404).json({ error: 'Assessment not found' });
 		res.status(200).json({ assessment: paper.assessment });

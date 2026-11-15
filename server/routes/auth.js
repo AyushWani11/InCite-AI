@@ -3,21 +3,11 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { check, validationResult } = require('express-validator');
-const mongoose = require('mongoose');
 const User = require('../models/user'); // User model
 const authLogin = require('../middleware/authToken');
 
-// JWT secret key
-const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret';
-
-// Connect to MongoDB
-mongoose
-	.connect(process.env.MONGODB_URI, {
-		useNewUrlParser: true,
-		useUnifiedTopology: true,
-	})
-	.then(() => console.log('MongoDB connected'))
-	.catch((err) => console.error('MongoDB connection error:', err));
+const JWT_SECRET = require('../utils/jwtSecret');
+const { authCookieOptions, TOKEN_MAX_AGE_MS } = require('../utils/authCookie');
 
 // Routes
 
@@ -60,13 +50,9 @@ router.post(
 			const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '3h' });
 
 			res.cookie('token', token, {
-				httpOnly: true,
-				secure: process.env.NODE_ENV === 'production',
-				sameSite: 'none',
-				maxAge: 3 * 60 * 60 * 1000,
+				...authCookieOptions(),
+				maxAge: TOKEN_MAX_AGE_MS,
 			});
-
-			console.log('Token:', token);
 
 			res.status(200).json({ msg: 'User registered successfully' });
 		} catch (err) {
@@ -107,13 +93,9 @@ router.post(
 
 			// Set token as an HTTP-only cookie
 			res.cookie('token', token, {
-				httpOnly: true,
-				secure: process.env.NODE_ENV === 'production', // Use secure cookies in production
-				sameSite: 'None',
-				maxAge: 3 * 60 * 60 * 1000, // Cookie expires in 3 hours
+				...authCookieOptions(),
+				maxAge: TOKEN_MAX_AGE_MS,
 			});
-
-			console.log('Token:', token);
 
 			res.status(200).json({ msg: 'Login successful' });
 		} catch (err) {
@@ -138,11 +120,7 @@ router.get('/check-login', authLogin, async (req, res) => {
 
 // Logout user
 router.post('/logout', (req, res) => {
-	res.clearCookie('token', {
-		httpOnly: true,
-		secure: true,
-		sameSite: 'none',
-	});
+	res.clearCookie('token', authCookieOptions());
 	res.status(200).json({ msg: 'Logged out successfully' });
 });
 

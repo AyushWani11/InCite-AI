@@ -2,11 +2,7 @@ import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './Logout.css';
 
-// Backend URL
-const backendUrl =
-	process.env.NODE_ENV === 'production'
-		? process.env.BACKEND_URL || 'https://incite-ai-4vrv.onrender.com/api'
-		: 'https://incite-ai-4vrv.onrender.com/api';
+import { API_BASE_URL as backendUrl } from '../config';
 
 const Logout = () => {
 	const navigate = useNavigate();

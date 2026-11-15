@@ -1,7 +1,7 @@
 {
   "dependencies": {
     "@dqbd/tiktoken": "^1.0.20",
-    "@google/generative-ai": "^0.21.0",
+    "@google/genai": "3.3.0",
     "@pinecone-database/pinecone": "^5.1.1",
     "axios": "^1.7.7",
     "bcrypt": "^5.1.1",
@@ -19,16 +19,26 @@
     "jsonwebtoken": "^9.0.2",
     "marked": "^14.1.2",
     "mongoose": "^8.7.0",
-    "multer": "^1.4.2",
-    "multer-gridfs-storage": "^5.0.2",
+    "multer": "^2.5.0",
     "node-fetch": "^3.3.2",
     "nodemon": "^3.1.7",
     "openai": "^4.63.0",
     "path": "^0.12.7",
     "pdf-parse": "^1.1.1",
-    "socket.io": "^4.8.0",
-    "socket.io-client": "^4.8.0",
     "stream": "^0.0.3",
     "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "mongodb-memory-server": "^10.4.3"
+  },
+  "scripts": {
+    "test": "node --test test/**/*.test.js",
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "reindex": "node scripts/reindex.js",
+    "inspect-pinecone": "node scripts/inspect-pinecone.js"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

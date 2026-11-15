@@ -9,10 +9,7 @@ import {
 	Trash2,
 } from 'lucide-react';
 
-const backendUrl =
-	process.env.NODE_ENV === 'production'
-		? process.env.BACKEND_URL || 'https://incite-ai-4vrv.onrender.com/api'
-		: 'https://incite-ai-4vrv.onrender.com/api';
+import { API_BASE_URL as backendUrl } from '../../config';
 
 interface Paper {
 	_id: string;
@@ -476,7 +473,8 @@ const PaperViewer: React.FC<PaperViewerProps> = ({ paper, onClose }) => {
 		return `${authors[0]} et al.`;
 	};
 
-	const pdfUrl = `${backendUrl}/paper/download/${paper.filename}`;
+	// Requires the login cookie; the server checks that this paper is yours.
+	const pdfUrl = `${backendUrl}/paper/download/${paper._id}`;
 
 	const handlePdfLoad = () => {
 		setPdfLoading(false);
@@ -570,7 +568,11 @@ const PaperViewer: React.FC<PaperViewerProps> = ({ paper, onClose }) => {
 			});
 
 			if (!response.ok) {
-				throw new Error(`Analysis failed: ${response.statusText}`);
+				// The server explains what went wrong (e.g. a 502 when the AI's
+				// reply was unusable even after a retry); show that message.
+				const body = await response.json().catch(() => ({}));
+				alert(body.error || `Failed to ${type} paper. Please try again.`);
+				return;
 			}
 
 			const result = await response.json();
@@ -582,7 +584,8 @@ const PaperViewer: React.FC<PaperViewerProps> = ({ paper, onClose }) => {
 				setExistingAssessment(result.assessment);
 				setShowAssessmentModal(true);
 			}
-		} catch (error) {
+		} catch {
+			// Network error: the server could not be reached at all.
 			alert(`Failed to ${type} paper. Please try again.`);
 		} finally {
 			setIsAnalyzing(false);

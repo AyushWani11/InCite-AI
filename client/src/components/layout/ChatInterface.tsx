@@ -18,11 +18,20 @@ import SpeechRecognition, {
 	useSpeechRecognition,
 } from 'react-speech-recognition';
 import CodeBlock from '../common/CodeBlock';
+import { API_BASE_URL as backendUrl } from '../../config';
 
 interface Paper {
 	_id: string;
 	title: string;
 	authors?: string[];
+}
+
+// Where an answer came from (sent by the server in the X-Sources header).
+interface Source {
+	paperId?: string;
+	title: string;
+	scope: string; // 'excerpts' | 'full text' | 'attached file' | ...
+	excerpts?: number[]; // chunk positions within the paper, from 0
 }
 
 interface Message {
@@ -31,16 +40,23 @@ interface Message {
 	content: string;
 	timestamp: Date;
 	isStreaming?: boolean;
+	sources?: Source[];
 }
+
+// The header holds URL-encoded JSON; anything unexpected means "no sources".
+const parseSources = (header: string | null): Source[] => {
+	if (!header) return [];
+	try {
+		const parsed = JSON.parse(decodeURIComponent(header));
+		return Array.isArray(parsed) ? parsed : [];
+	} catch {
+		return [];
+	}
+};
 
 interface ChatInterfaceProps {
 	selectedPaper: Paper | null;
 }
-
-const backendUrl =
-	process.env.NODE_ENV === 'production'
-		? process.env.BACKEND_URL || 'https://incite-ai-4vrv.onrender.com/api'
-		: 'https://incite-ai-4vrv.onrender.com/api';
 
 // Custom hook for streaming chat with enhanced features
 const useEnhancedStreamingChat = () => {
@@ -52,7 +68,7 @@ const useEnhancedStreamingChat = () => {
 		file?: File,
 		paperId?: string,
 		onChunk?: (chunk: string) => void,
-		onComplete?: () => void
+		onComplete?: (sources: Source[]) => void
 	) => {
 		setIsLoading(true);
 
@@ -93,6 +109,8 @@ const useEnhancedStreamingChat = () => {
 				);
 			}
 
+			const sources = parseSources(response.headers.get('X-Sources'));
+
 			// Rest of your streaming logic remains the same
 			const reader = response.body?.getReader();
 			const decoder = new TextDecoder();
@@ -112,7 +130,7 @@ const useEnhancedStreamingChat = () => {
 				}
 			}
 
-			onComplete?.();
+			onComplete?.(sources);
 		} catch (error) {
 			console.error('Chat error:', error);
 			throw error;
@@ -286,8 +304,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedPaper }) => {
 		try {
 			let accumulatedContent = '';
 
+			// The paper's database id: titles are not unique and may come from
+			// the PDF's own metadata, so the server could not find papers by them.
 			const paperIdToSend =
-				selectedPaper && !selectedFile ? selectedPaper.title : undefined;
+				selectedPaper && !selectedFile ? selectedPaper._id : undefined;
 
 			const formattedHistory = messages
 				.map((msg) => ({
@@ -315,11 +335,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedPaper }) => {
 						)
 					);
 				},
-				() => {
+				(sources) => {
 					setMessages((prev) =>
 						prev.map((msg) =>
 							msg.id === assistantMessageId
-								? { ...msg, isStreaming: false }
+								? { ...msg, isStreaming: false, sources }
 								: msg
 						)
 					);
@@ -527,6 +547,21 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedPaper }) => {
 											dangerouslySetInnerHTML={{ __html: marked(part.content) }}
 										/>
 									)
+								)}
+
+								{!message.isStreaming && message.sources && message.sources.length > 0 && (
+									<div className='mt-2 pt-2 border-t border-gray-100 text-xs text-gray-500'>
+										<span className='font-medium'>Sources: </span>
+										{message.sources.map((source, i) => (
+											<span key={i}>
+												{i > 0 && '; '}
+												{source.title}
+												{source.scope === 'excerpts' && source.excerpts?.length
+													? ` (excerpts ${source.excerpts.map((n) => n + 1).join(', ')})`
+													: ` (${source.scope})`}
+											</span>
+										))}
+									</div>
 								)}
 
 								{message.isStreaming && (
