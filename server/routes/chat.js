@@ -17,7 +17,15 @@ require('dotenv').config();
 function fullTextMaxChars() {
 	return Number(process.env.CHAT_FULL_TEXT_MAX_CHARS) || 100000;
 }
-const CHUNKS_PER_ANSWER = 4;
+// How many chunks (excerpts of at most 400 characters) an answer gets.
+// Default 8: measured on real papers, the top 4 covered narrow factual
+// questions, but for "explain" / "walk me through" questions ranks 5-8 still
+// held relevant passages; 4 more excerpts cost only ~400 tokens.
+const DEFAULT_TOP_K = 8;
+function chunksPerAnswer() {
+	const k = Number.parseInt(process.env.RETRIEVAL_TOP_K, 10);
+	return k >= 1 && k <= 20 ? k : DEFAULT_TOP_K;
+}
 // Without a selected paper, this many chunks are compared to pick the paper.
 const CANDIDATE_CHUNKS = 20;
 
@@ -145,7 +153,7 @@ router.post('/', authLogin, upload.single('file'), async (req, res) => {
 				context = text;
 			} else {
 				// Too long: only its chunks most relevant to the question.
-				const chunks = await searchRelevantChunks(userQuestion, CHUNKS_PER_ANSWER, paper._id, req.user.id);
+				const chunks = await searchRelevantChunks(userQuestion, chunksPerAnswer(), paper._id, req.user.id);
 				context = chunks.length ? formatChunks(chunks) : text.slice(0, fullTextMaxChars());
 			}
 		} else {
@@ -176,7 +184,14 @@ router.post('/', authLogin, upload.single('file'), async (req, res) => {
 			}
 			console.log(`Chose "${paper.title}" (top-3 average ${paper.score.toFixed(3)}, best chunk ${best.toFixed(3)})`);
 			sourceLabel = paper.title;
-			context = formatChunks(paper.chunks.slice(0, CHUNKS_PER_ANSWER));
+			// The chosen paper's best chunks among the candidates; if other
+			// papers took too many candidate slots, search within it for more.
+			const k = chunksPerAnswer();
+			const chunks =
+				paper.chunks.length >= k
+					? paper.chunks.slice(0, k)
+					: await searchRelevantChunks(userQuestion, k, paper.paperId, req.user.id);
+			context = formatChunks(chunks);
 		}
 
 		if (!context || context.trim().length < 20) {
