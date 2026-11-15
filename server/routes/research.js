@@ -8,6 +8,8 @@ const authLogin = require('../middleware/authToken');
 const Paper = require('../models/paper');
 const {
 	findOwnedPaper,
+	findPaperFile,
+	openFileStream,
 	readPaperFile,
 	deletePaperFile,
 } = require('../utils/papers');
@@ -167,21 +169,29 @@ router.get('/search', authLogin, async (req, res) => {
 	}
 });
 
-// Download paper
-router.get('/download/:filename', async (req, res) => {
+// Download (or view inline) one of your own papers, by paper id.
+router.get('/download/:paperId', authLogin, async (req, res) => {
 	try {
-		const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
-			bucketName: 'papers',
-		});
-		const stream = bucket.openDownloadStreamByName(req.params.filename);
+		const paper = await findOwnedPaper(req.params.paperId, req.user.id);
+		const file = paper && (await findPaperFile(paper));
+		if (!file) return res.status(404).json({ error: 'File not found' });
+
 		res.set('Content-Type', 'application/pdf');
 		res.set('Content-Disposition', 'inline');
-		stream
-			.pipe(res)
-			.on('error', () => res.status(404).json({ error: 'File not found' }));
+		res.set('Content-Length', String(file.length));
+
+		// Listen for errors on the file stream itself. An unhandled stream
+		// error is an uncaught exception, which would stop the whole server.
+		openFileStream(file)
+			.on('error', (err) => {
+				console.error('Download stream failed:', err);
+				if (!res.headersSent) res.status(500).json({ error: 'Download failed' });
+				else res.destroy(err);
+			})
+			.pipe(res);
 	} catch (err) {
-		console.error(err);
-		res.status(500).json({ error: 'Download failed' });
+		console.error('Download failed:', err);
+		if (!res.headersSent) res.status(500).json({ error: 'Download failed' });
 	}
 });
 

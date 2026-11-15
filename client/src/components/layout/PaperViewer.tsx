@@ -476,7 +476,8 @@ const PaperViewer: React.FC<PaperViewerProps> = ({ paper, onClose }) => {
 		return `${authors[0]} et al.`;
 	};
 
-	const pdfUrl = `${backendUrl}/paper/download/${paper.filename}`;
+	// Requires the login cookie; the server checks that this paper is yours.
+	const pdfUrl = `${backendUrl}/paper/download/${paper._id}`;
 
 	const handlePdfLoad = () => {
 		setPdfLoading(false);

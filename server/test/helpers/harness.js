@@ -46,7 +46,13 @@ function makeClient(base) {
 			body = form;
 		}
 
-		const res = await fetch(base + path, { method, headers, body });
+		// A route that never responds should fail the test, not hang the run.
+		const res = await fetch(base + path, {
+			method,
+			headers,
+			body,
+			signal: AbortSignal.timeout(15000),
+		});
 		for (const c of res.headers.getSetCookie()) {
 			if (c.startsWith('token=')) cookie = c.split(';')[0];
 		}
