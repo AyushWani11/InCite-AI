@@ -2,8 +2,6 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
-const http = require('http');
-const { Server } = require('socket.io');
 require('dotenv').config();
 const chatRoutes = require('./routes/chat');
 const authRoutes = require('./routes/auth');
@@ -39,59 +37,6 @@ app.use(
 	}
 );
 
-// Create an HTTP server for Socket.IO
-const server = http.createServer(app);
-const io = new Server(server, {
-	cors: {
-		origin:
-			process.env.NODE_ENV === 'production'
-				? process.env.FRONTEND_URL // Production frontend URL
-				: 'https://in-cite-ai.vercel.app', // Development frontend URL
-	},
-});
-
-// Set up Socket.IO connection for real-time streaming
-io.on('connection', (socket) => {
-	console.log('New client connected');
-
-	// Handle incoming message from client with real-time streaming
-	socket.on('send_message', async ({ question, fileContent }) => {
-		try {
-			const chatSession = model.startChat({
-				generationConfig,
-				history: [],
-			});
-
-			const message = fileContent ? `${fileContent}\n${question}` : question;
-
-			const stream = await chatSession.sendMessageStream(message);
-			stream.on('data', (chunk) => {
-				// Send partial response to client for progressive loading
-				socket.emit('receive_partial_response', { partialAnswer: chunk });
-			});
-
-			stream.on('end', () => {
-				// Notify client that the response is complete
-				socket.emit('receive_response_complete');
-			});
-
-			stream.on('error', (error) => {
-				console.error('Streaming error:', error);
-				socket.emit('receive_response', {
-					answer: 'An error occurred during streaming.',
-				});
-			});
-		} catch (error) {
-			console.error('Error:', error);
-			socket.emit('receive_response', { answer: 'An error occurred.' });
-		}
-	});
-
-	socket.on('disconnect', () => {
-		console.log('Client disconnected');
-	});
-});
-
 // Use chat routes
 app.use('/api/chat', chatRoutes);
 app.use('/api/auth', authRoutes);
@@ -99,6 +44,6 @@ app.use('/api/paper', paperRoutes);
 
 // Start the server
 const PORT = 5000;
-server.listen(PORT, () => {
+app.listen(PORT, () => {
 	console.log(`Server running on port ${PORT}`);
 });
