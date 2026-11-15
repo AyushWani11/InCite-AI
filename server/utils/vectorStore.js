@@ -1,6 +1,7 @@
 const { Pinecone } = require('@pinecone-database/pinecone');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { v4: uuidv4 } = require('uuid');
+const { splitIntoChunks } = require('./chunking');
 require('dotenv').config();
 
 const pc = new Pinecone({
@@ -12,23 +13,6 @@ const namespaceName = 'papers';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const embedder = genAI.getGenerativeModel({ model: 'embedding-001' });
-
-function splitIntoSentences(text, maxChunkSize = 400) {
-	const sentences = text.split(/(?<=[.?!])\s+(?=[A-Z])/); // split by sentence
-	const chunks = [];
-
-	let current = '';
-	for (let sentence of sentences) {
-		if ((current + sentence).length > maxChunkSize) {
-			if (current) chunks.push(current.trim());
-			current = sentence;
-		} else {
-			current += ' ' + sentence;
-		}
-	}
-	if (current) chunks.push(current.trim());
-	return chunks;
-}
 
 // Embed a string of text using Gemini
 async function embedText(text) {
@@ -62,7 +46,7 @@ async function addPaperChunks(paperId, userId, title, text) {
 	const index = pc.index(indexName);
 	const ns = index.namespace(namespaceName);
 
-	const chunks = splitIntoSentences(text);
+	const chunks = splitIntoChunks(text);
 
 	const vectors = await Promise.all(
 		chunks.map(async (chunk, i) => {
