@@ -7,8 +7,7 @@ const mongoose = require('mongoose');
 const User = require('../models/user'); // User model
 const authLogin = require('../middleware/authToken');
 
-// JWT secret key
-const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret';
+const JWT_SECRET = require('../utils/jwtSecret');
 
 // Connect to MongoDB
 mongoose
