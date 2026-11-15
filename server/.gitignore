@@ -21,3 +21,6 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# temporary chat attachments written by multer (routes/chat.js)
+uploads/
