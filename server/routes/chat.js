@@ -36,6 +36,15 @@ const NOT_FOUND_REPLY =
 const formatChunks = (chunks) =>
 	chunks.map((c, i) => `Excerpt ${i + 1}:\n${c.text}`).join('\n\n');
 
+// A source entry for an answer built from some of a paper's chunks:
+// which paper, and which chunks (by position in the paper), in order.
+const excerptSource = (paperId, title, chunks) => ({
+	paperId: String(paperId),
+	title,
+	scope: 'excerpts',
+	excerpts: [...new Set(chunks.map((c) => c.meta.chunkIndex))].sort((a, b) => a - b),
+});
+
 const router = express.Router();
 // defParamCharset: browsers send filenames as UTF-8; multer 2 assumes latin1.
 const upload = multer({ dest: 'uploads/', defParamCharset: 'utf8' });
@@ -128,6 +137,8 @@ router.post('/', authLogin, upload.single('file'), async (req, res) => {
 	try {
 		let context = '';
 		let sourceLabel = 'uploaded file';
+		// What the answer is based on, sent to the client in X-Sources.
+		let sources = [];
 
 		if (req.file) {
 			// 1. A file attached to this message: answer from it.
@@ -140,6 +151,7 @@ router.post('/', authLogin, upload.single('file'), async (req, res) => {
 			}
 			await fs.unlink(req.file.path);
 			context = fileContent;
+			sources = [{ title: req.file.originalname, scope: 'attached file' }];
 		} else if (paperId) {
 			// 2. A selected paper, identified by its _id and checked for ownership.
 			const paper = await findOwnedPaper(paperId, req.user.id);
@@ -148,13 +160,21 @@ router.post('/', authLogin, upload.single('file'), async (req, res) => {
 
 			const pdf = await readPaperFile(paper);
 			const text = pdf ? (await parsePdf(pdf)).text : '';
+			const id = String(paper._id);
 			if (text && text.length <= fullTextMaxChars()) {
 				// Short enough: the model reads the whole paper.
 				context = text;
+				sources = [{ paperId: id, title: paper.title, scope: 'full text' }];
 			} else {
 				// Too long: only its chunks most relevant to the question.
 				const chunks = await searchRelevantChunks(userQuestion, chunksPerAnswer(), paper._id, req.user.id);
-				context = chunks.length ? formatChunks(chunks) : text.slice(0, fullTextMaxChars());
+				if (chunks.length) {
+					context = formatChunks(chunks);
+					sources = [excerptSource(id, paper.title, chunks)];
+				} else {
+					context = text.slice(0, fullTextMaxChars());
+					sources = [{ paperId: id, title: paper.title, scope: 'beginning of the paper' }];
+				}
 			}
 		} else {
 			// 3. No paper selected: find the paper the question is about.
@@ -192,6 +212,7 @@ router.post('/', authLogin, upload.single('file'), async (req, res) => {
 					? paper.chunks.slice(0, k)
 					: await searchRelevantChunks(userQuestion, k, paper.paperId, req.user.id);
 			context = formatChunks(chunks);
+			sources = [excerptSource(paper.paperId, paper.title, chunks)];
 		}
 
 		if (!context || context.trim().length < 20) {
@@ -230,6 +251,10 @@ ${context}`,
 
 		res.setHeader('Content-Type', 'text/plain');
 		res.setHeader('Transfer-Encoding', 'chunked');
+		// The answer is streamed as plain text, so its sources travel in a
+		// header, sent before the first word. Header values must be ASCII, so
+		// the JSON is URL-encoded (titles can contain any character).
+		res.setHeader('X-Sources', encodeURIComponent(JSON.stringify(sources)));
 
 		for await (const piece of reply) {
 			res.write(piece);

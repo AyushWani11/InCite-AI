@@ -18,6 +18,8 @@ const corsOptions = {
 			? process.env.FRONTEND_URL // Production frontend URL
 			: 'https://in-cite-ai.vercel.app', // Development frontend URL
 	credentials: true, // Allow cookies to be sent with requests
+	// Let the frontend (a different site in production) read chat sources.
+	exposedHeaders: ['X-Sources'],
 };
 app.use(cors(corsOptions));
 app.use(bodyParser.json());
