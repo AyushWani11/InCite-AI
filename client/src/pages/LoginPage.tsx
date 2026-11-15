@@ -3,11 +3,7 @@ import { useNavigate } from 'react-router-dom';
 
 import './Login.css';
 
-// Backend URL
-const backendUrl =
-	process.env.NODE_ENV === 'production'
-		? process.env.BACKEND_URL || 'https://incite-ai-4vrv.onrender.com/api'
-		: 'https://incite-ai-4vrv.onrender.com/api';
+import { API_BASE_URL as backendUrl } from '../config';
 
 interface FormData {
 	email: string;

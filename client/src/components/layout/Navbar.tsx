@@ -3,10 +3,7 @@ import { Link } from 'react-router-dom';
 import { FileText, Menu, X } from 'lucide-react';
 import { Button } from '../common';
 
-const backendUrl =
-	process.env.NODE_ENV === 'production'
-		? 'https://incite-ai-4vrv.onrender.com/api'
-		: 'https://incite-ai-4vrv.onrender.com/api';
+import { API_BASE_URL as backendUrl } from '../../config';
 
 const Navbar: React.FC = () => {
 	const [isMenuOpen, setIsMenuOpen] = useState(false);

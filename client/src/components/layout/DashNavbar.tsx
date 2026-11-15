@@ -5,10 +5,7 @@ import type { ChangeEvent } from 'react';
 import { Upload } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
-const backendUrl =
-	process.env.NODE_ENV === 'production'
-		? 'https://incite-ai-4vrv.onrender.com/api'
-		: 'https://incite-ai-4vrv.onrender.com/api';
+import { API_BASE_URL as backendUrl } from '../../config';
 
 interface User {
 	id: string;
