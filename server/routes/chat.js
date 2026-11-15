@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto');
 const fs = require('fs').promises;
 const multer = require('multer');
 const { parsePdf } = require('../utils/pdf');
@@ -10,6 +11,7 @@ const Paper = require('../models/paper');
 const { searchRelevantChunks } = require('../utils/vectorStore');
 const { findOwnedPaper, readPaperFile } = require('../utils/papers');
 const { choosePaper } = require('../utils/paperSelection');
+const { parseSaveRequest, toStored, fromStored, HistoryError } = require('../utils/chatHistory');
 require('dotenv').config();
 
 // A selected paper up to this many characters (~25k tokens) is given to the
@@ -269,22 +271,32 @@ ${context}`,
 	}
 });
 
+// Saves a conversation. With a sessionId (chosen by the client, one per open
+// chat) saving again replaces that conversation instead of adding a copy;
+// without one, a new session is created. Either way the session belongs to
+// the logged-in user: the lookup always includes their id.
 router.post('/save-history', authLogin, async (req, res) => {
-	const { history } = req.body;
-	if (!history || !Array.isArray(history)) {
-		return res.status(400).json({ error: 'Invalid chat history' });
+	let parsed;
+	try {
+		parsed = parseSaveRequest(req.body);
+	} catch (err) {
+		if (err instanceof HistoryError) return res.status(400).json({ error: err.message });
+		// Express 4 doesn't catch errors thrown by async handlers; answer here.
+		console.error('Checking chat history to save failed:', err);
+		return res.status(500).json({ error: 'Failed to save chat history' });
 	}
 
+	const chatSessionId = parsed.sessionId || crypto.randomUUID();
 	try {
-		const chatSessionId = Date.now().toString();
-		await new ChatHistory({
-			userId: req.user.id,
-			chatSessionId,
-			history,
-		}).save();
-		res.status(200).json({ msg: 'Chat history saved successfully' });
+		const result = await ChatHistory.findOneAndUpdate(
+			{ userId: req.user.id, chatSessionId },
+			{ $set: { history: toStored(parsed.messages) } },
+			{ upsert: true, runValidators: true, includeResultMetadata: true }
+		);
+		const created = !result.lastErrorObject?.updatedExisting;
+		res.status(created ? 201 : 200).json({ msg: 'Chat history saved', sessionId: chatSessionId });
 	} catch (err) {
-		console.error(err);
+		console.error('Saving chat history failed:', err);
 		res.status(500).json({ error: 'Failed to save chat history' });
 	}
 });
@@ -292,8 +304,8 @@ router.post('/save-history', authLogin, async (req, res) => {
 router.get('/history', authLogin, async (req, res) => {
 	try {
 		const sessions = await ChatHistory.find({ userId: req.user.id })
-			.sort({ createdAt: -1 })
-			.select('chatSessionId createdAt')
+			.sort({ updatedAt: -1, createdAt: -1 })
+			.select('chatSessionId createdAt updatedAt')
 			.limit(20);
 		res.status(200).json({ chatHistory: sessions });
 	} catch (err) {
@@ -309,7 +321,8 @@ router.get('/history/:sessionId', authLogin, async (req, res) => {
 			chatSessionId: req.params.sessionId,
 		});
 		if (!session) return res.status(404).json({ error: 'Session not found' });
-		res.status(200).json({ history: session.history });
+		// Same { role, text } shape the client saved.
+		res.status(200).json({ history: fromStored(session.history) });
 	} catch (err) {
 		console.error(err);
 		res.status(500).json({ error: 'Could not retrieve session' });

@@ -212,7 +212,8 @@ All routes except register/login/logout need the login cookie.
 | `POST /api/paper/summarize/:paperId`, `GET /api/paper/summary/:paperId` | Generate / fetch a structured summary (`502` if the AI reply is unusable, `422` if the PDF has no text) |
 | `POST /api/paper/assess/:paperId`, `GET /api/paper/assessment/:paperId` | Generate / fetch a quality assessment |
 | `POST /api/chat` | Ask a question: form fields `question`, `history` (JSON), optional `paperId` (`_id`) or `file`. Streams text; sources in the `X-Sources` header (URL-encoded JSON) |
-| `GET /api/chat/history`, `GET /api/chat/history/:sessionId` | Saved chat sessions (see limitations) |
+| `POST /api/chat/save-history` | Save a conversation: `{ sessionId?, history: [{ role: 'user' \| 'assistant', text }] }` as JSON or `text/plain`. With the same `sessionId` it updates that conversation (`200`) instead of adding one (`201`) |
+| `GET /api/chat/history`, `GET /api/chat/history/:sessionId` | Your saved conversations (latest 20) / one conversation as `{ role, text }` messages |
 
 ## Deployment notes
 
@@ -234,9 +235,12 @@ Being honest about what this does not do (yet):
 - **Gemini free tier:** Google states that free-tier content may be used to
   improve its products, so uploaded papers are seen by Google. Free-tier rate
   limits also apply (summaries of very long documents make several requests).
-- **Saving chat history does not work.** The client sends JSON, but the server
-  route expects a `text/plain` body, and the message roles do not match the
-  database schema. Chat history is kept in the browser only.
+- **Saved conversations aren't shown in the app yet.** A conversation is
+  saved when you close the tab (checked in Chrome, also cross-origin as in
+  production) and can be read through `GET /api/chat/history`, but there is no
+  history screen. Leaving the dashboard inside the app (Log out, Home page)
+  doesn't save it, and phones often close tabs without the event the save
+  relies on (`beforeunload`).
 - **No upload size limit** beyond 10 files per request; files are held in
   memory while processed.
 - **Search** builds regular expressions from user input (a malformed pattern
