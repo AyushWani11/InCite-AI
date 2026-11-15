@@ -4,6 +4,7 @@ const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
 const { startApp, registerUser, uploadPdf } = require('./helpers/harness');
+const Paper = require('../models/paper');
 const { makePdf } = require('./helpers/pdf');
 
 const GOOD_JSON = JSON.stringify({
@@ -117,9 +118,12 @@ test('papers uploaded before file ids were stored still open their own file', as
 	await upload(mallory, 'legacy.pdf', 'MIKE'); // newer, same name
 
 	// Simulate an old record: it only knows the filename, not the file id.
-	await mongoose.connection.db
-		.collection('papers')
-		.updateOne({ _id: new mongoose.Types.ObjectId(judyPaper) }, { $unset: { fileId: '' } });
+	// (Use the model's own collection: Mongoose names it "paper", not "papers".)
+	const result = await Paper.collection.updateOne(
+		{ _id: new mongoose.Types.ObjectId(judyPaper) },
+		{ $unset: { fileId: '' } }
+	);
+	assert.equal(result.modifiedCount, 1, 'the paper should now look like an old record');
 
 	assert.equal((await judy.post(`/api/paper/summarize/${judyPaper}`)).status, 200);
 	assert.match(lastPrompt(), /JULIET/);
