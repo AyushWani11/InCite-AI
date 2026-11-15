@@ -7,7 +7,9 @@
 // app is loaded.
 const Module = require('module');
 
-const DIM = 64;
+// Dimensions of the fake embeddings. Large enough that unrelated words rarely
+// hash to the same slot (which would fake a similarity between them).
+const DIM = 1024;
 
 const state = {
 	gemini: {

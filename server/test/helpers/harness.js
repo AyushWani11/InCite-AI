@@ -10,6 +10,10 @@ async function startApp() {
 	process.env.GEMINI_API_KEY = 'fake-gemini-key';
 	process.env.PINECONE_API_KEY = 'fake-pinecone-key';
 	process.env.PINECONE_INDEX_NAME = 'test-index';
+	// The fake bag-of-words embeddings score lower than the real model, so
+	// tests use their own cutoff. (0.25, the default, was calibrated on the
+	// real llama-text-embed-v2 index.)
+	process.env.PAPER_MATCH_MIN_SCORE = '0.1';
 
 	const mongo = await MongoMemoryServer.create();
 	await mongoose.connect(mongo.getUri());

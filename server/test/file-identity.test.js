@@ -52,30 +52,25 @@ test('summarize and assess read the right file when two users share a filename',
 	assert.match(lastPrompt(), /BRAVO/);
 });
 
-test('chat by filename only opens files the caller uploaded', async () => {
+test("chat about a selected paper opens that paper's own file, never a same-named one", async () => {
 	const carol = await registerUser(app.base, 'carol');
 	const dan = await registerUser(app.base, 'dan');
-	await upload(carol, 'shared-name.pdf', 'CHARLIE');
-	await upload(dan, 'shared-name.pdf', 'DELTA'); // newer upload
+	const carolPaper = await upload(carol, 'shared-name.pdf', 'CHARLIE');
+	await upload(dan, 'shared-name.pdf', 'DELTA'); // newer upload, same filename
 
-	const chatsBefore = app.fakes.state.gemini.chats.length;
-	const res = await chat(carol, 'shared-name.pdf');
+	const res = await chat(carol, carolPaper); // papers are selected by _id
 	assert.equal(res.status, 200);
 	const sent = JSON.stringify(app.fakes.state.gemini.chats.at(-1).history);
 	assert.match(sent, /CHARLIE/);
 	assert.doesNotMatch(sent, /DELTA/);
 
-	// Someone with no file of that name must get nothing from either user.
+	// A filename is no longer accepted as a paper identifier, by anyone.
 	const eve = await registerUser(app.base, 'eve');
 	const before = app.fakes.state.gemini.chats.length;
-	const stranger = await chat(eve, 'shared-name.pdf');
-	assert.notEqual(stranger.status, 200);
-	const newChats = app.fakes.state.gemini.chats.slice(before);
-	assert.ok(
-		!JSON.stringify(newChats).match(/CHARLIE|DELTA/),
-		"eve's chat received another user's paper"
-	);
-	assert.ok(chatsBefore < app.fakes.state.gemini.chats.length);
+	for (const [user, id] of [[eve, 'shared-name.pdf'], [carol, 'shared-name.pdf'], [eve, carolPaper]]) {
+		assert.equal((await chat(user, id)).status, 404, `${user.name} with ${id}`);
+	}
+	assert.equal(app.fakes.state.gemini.chats.length, before, 'nothing was sent to the model');
 });
 
 test("deleting a paper never deletes another user's file with the same name", async () => {

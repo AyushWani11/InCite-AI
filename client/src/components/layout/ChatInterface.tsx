@@ -282,8 +282,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedPaper }) => {
 		try {
 			let accumulatedContent = '';
 
+			// The paper's database id: titles are not unique and may come from
+			// the PDF's own metadata, so the server could not find papers by them.
 			const paperIdToSend =
-				selectedPaper && !selectedFile ? selectedPaper.title : undefined;
+				selectedPaper && !selectedFile ? selectedPaper._id : undefined;
 
 			const formattedHistory = messages
 				.map((msg) => ({
