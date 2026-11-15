@@ -25,8 +25,22 @@ const state = {
 		namespaces: new Map(), // namespace -> Map(id -> record)
 		queries: [],
 		deletes: [],
+		upsertBatches: [], // { namespace, size } per upsertRecords call
 		deleteFails: false, // simulate Pinecone being unavailable for deletes
+		// Real Pinecone may answer 404 for a namespace that has no records yet.
+		missingNamespaceThrows: false,
+		// What describeIndex returns; mirrors the real "research-assistant".
+		indexConfig: null,
 	},
+};
+
+const DEFAULT_INDEX_CONFIG = {
+	dimension: 768,
+	metric: 'cosine',
+	vectorType: 'dense',
+	spec: { serverless: { cloud: 'aws', region: 'us-east-1' } },
+	status: { ready: true, state: 'Ready' },
+	embed: { model: 'llama-text-embed-v2', fieldMap: { text: 'text' } },
 };
 
 function reset() {
@@ -39,7 +53,10 @@ function reset() {
 	state.pinecone.namespaces = new Map();
 	state.pinecone.queries = [];
 	state.pinecone.deletes = [];
+	state.pinecone.upsertBatches = [];
 	state.pinecone.deleteFails = false;
+	state.pinecone.missingNamespaceThrows = false;
+	state.pinecone.indexConfig = structuredClone(DEFAULT_INDEX_CONFIG);
 }
 reset();
 
@@ -158,8 +175,95 @@ function namespaceStore(name) {
 	return state.pinecone.namespaces.get(name);
 }
 
+function notFound(nsName) {
+	const err = new Error(`[fake pinecone] namespace "${nsName}" not found`);
+	err.name = 'PineconeNotFoundError';
+	return err;
+}
+
+// Pinecone accepts string, number, boolean or list-of-strings metadata.
+function checkMetadataValue(key, value) {
+	const ok =
+		typeof value === 'string' ||
+		typeof value === 'number' ||
+		typeof value === 'boolean' ||
+		(Array.isArray(value) && value.every((v) => typeof v === 'string'));
+	if (!ok) {
+		throw new Error(`[fake pinecone] invalid metadata value for "${key}": ${JSON.stringify(value)}`);
+	}
+}
+
 function fakeNamespace(nsName) {
+	const textField = () => state.pinecone.indexConfig.embed?.fieldMap?.text;
+	const missing = () => !state.pinecone.namespaces.has(nsName);
+
 	return {
+		// Integrated embedding: Pinecone embeds each record's text field.
+		async upsertRecords(records) {
+			if (!state.pinecone.indexConfig.embed) {
+				throw new Error('[fake pinecone] upsertRecords needs an index with integrated embedding');
+			}
+			if (!Array.isArray(records) || records.length === 0) {
+				throw new Error('[fake pinecone] upsertRecords needs a non-empty array');
+			}
+			if (records.length > 96) {
+				throw new Error(`[fake pinecone] at most 96 records per upsertRecords call, got ${records.length}`);
+			}
+			state.pinecone.upsertBatches.push({ namespace: nsName, size: records.length });
+			const store = namespaceStore(nsName);
+			for (const record of records) {
+				const { id, _id, ...fields } = record;
+				const recordId = id ?? _id;
+				if (!recordId) throw new Error('[fake pinecone] every record needs an id');
+				if (typeof fields[textField()] !== 'string') {
+					throw new Error(`[fake pinecone] record ${recordId} has no "${textField()}" text to embed`);
+				}
+				for (const [k, v] of Object.entries(fields)) checkMetadataValue(k, v);
+				store.set(recordId, {
+					id: recordId,
+					values: fakeEmbed(fields[textField()]),
+					metadata: structuredClone(fields),
+				});
+			}
+		},
+		async searchRecords({ query, fields }) {
+			state.pinecone.queries.push({
+				namespace: nsName,
+				topK: query.topK,
+				filter: query.filter,
+				text: query.inputs?.text,
+			});
+			if (missing()) {
+				if (state.pinecone.missingNamespaceThrows) throw notFound(nsName);
+				return { result: { hits: [] }, usage: {} };
+			}
+			const vector = fakeEmbed(query.inputs.text);
+			const hits = [...namespaceStore(nsName).values()]
+				.filter((r) => matchesFilter(r.metadata, query.filter))
+				.map((r) => ({
+					_id: r.id,
+					_score: r.values.reduce((s, x, i) => s + x * vector[i], 0),
+					fields: Object.fromEntries(
+						(fields || Object.keys(r.metadata))
+							.filter((f) => f in r.metadata)
+							.map((f) => [f, r.metadata[f]])
+					),
+				}))
+				.sort((a, b) => b._score - a._score)
+				.slice(0, query.topK);
+			return { result: { hits }, usage: {} };
+		},
+		async deleteAll() {
+			state.pinecone.deletes.push({ namespace: nsName, options: 'ALL' });
+			if (state.pinecone.deleteFails) {
+				throw new Error('[fake pinecone] service unavailable');
+			}
+			if (missing()) {
+				if (state.pinecone.missingNamespaceThrows) throw notFound(nsName);
+				return;
+			}
+			state.pinecone.namespaces.delete(nsName); // an emptied namespace disappears
+		},
 		async upsert(records) {
 			if (!Array.isArray(records) || records.length === 0) {
 				throw new Error('[fake pinecone] upsert needs a non-empty array');
@@ -188,6 +292,10 @@ function fakeNamespace(nsName) {
 			if (state.pinecone.deleteFails) {
 				throw new Error('[fake pinecone] service unavailable');
 			}
+			if (missing()) {
+				if (state.pinecone.missingNamespaceThrows) throw notFound(nsName);
+				return;
+			}
 			const store = namespaceStore(nsName);
 			for (const [id, r] of store) {
 				const hit = Array.isArray(options)
@@ -202,6 +310,9 @@ function fakeNamespace(nsName) {
 class FakePinecone {
 	constructor(config) {
 		this.config = config;
+	}
+	async describeIndex(name) {
+		return { name, ...structuredClone(state.pinecone.indexConfig) };
 	}
 	index(name) {
 		return {

@@ -16,10 +16,11 @@ async function upload(user, name, word) {
 	return res.body.papers[0]._id;
 }
 
-// All stored chunks, as [{ paperId, userId, text }].
+// All stored chunks across every namespace, as [{ namespace, paperId, text, ... }].
 function storedChunks() {
-	const ns = app.fakes.state.pinecone.namespaces.get('papers') || new Map();
-	return [...ns.values()].map((r) => r.metadata);
+	return [...app.fakes.state.pinecone.namespaces].flatMap(([namespace, records]) =>
+		[...records.values()].map((r) => ({ namespace, ...r.metadata }))
+	);
 }
 
 const chunksOf = (paperId) => storedChunks().filter((m) => m.paperId === paperId);
@@ -73,7 +74,7 @@ test('delete-all removes all of the caller’s chunks and reports success', asyn
 
 	const res = await dave.del('/api/paper/delete-all');
 	assert.equal(res.status, 200, JSON.stringify(res.body));
-	assert.equal(storedChunks().filter((m) => m.userId === dave.id).length, 0);
+	assert.equal(storedChunks().filter((m) => m.namespace === `v2-${dave.id}`).length, 0);
 	assert.ok(chunksOf(erinPaper).length > 0, "erin's chunks were deleted");
 });
 

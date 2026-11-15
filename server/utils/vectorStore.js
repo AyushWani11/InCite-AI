@@ -1,126 +1,106 @@
 const { Pinecone } = require('@pinecone-database/pinecone');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-const { v4: uuidv4 } = require('uuid');
 const { splitIntoChunks } = require('./chunking');
 require('dotenv').config();
+
+// Embeddings are made by Pinecone itself. The index uses "integrated
+// embedding" (llama-text-embed-v2): we send plain text and Pinecone turns it
+// into vectors, both when storing chunks and when searching. The record field
+// it embeds is set by the index's field map; for our index that is "text".
+// Switching embedding model means a new index (see scripts/reindex.js).
+const TEXT_FIELD = 'text';
+const UPSERT_BATCH_SIZE = 96; // most records Pinecone embeds per request
+const RETURN_FIELDS = [TEXT_FIELD, 'paperId', 'title', 'chunkIndex'];
 
 const pc = new Pinecone({
 	apiKey: process.env.PINECONE_API_KEY,
 });
 
-const indexName = process.env.PINECONE_INDEX_NAME;
-const namespaceName = 'papers';
+function namespacePrefix() {
+	return process.env.PINECONE_NAMESPACE_PREFIX || 'v2';
+}
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const embedder = genAI.getGenerativeModel({ model: 'embedding-001' });
+// Every user has their own namespace, "<prefix>-<userId>". A search can only
+// ever see the namespace it is given, so one user's chunks can never show up
+// in another user's results, even if a filter were forgotten. The prefix
+// marks the embedding version: re-indexing for a new model writes to new
+// namespaces (e.g. "v3-...") and leaves the old ones untouched.
+function namespaceName(userId) {
+	if (!userId) throw new Error('userId is required to choose a namespace');
+	return `${namespacePrefix()}-${userId}`;
+}
 
-// Embed a string of text using Gemini
-async function embedText(text) {
-	const cleaned = text
-		.replace(/[^a-zA-Z0-9\s.,;:?!()'"-]/g, '')
-		.replace(/\s+/g, ' ')
-		.trim();
+function userNamespace(userId) {
+	return pc.index(process.env.PINECONE_INDEX_NAME).namespace(namespaceName(userId));
+}
 
-	if (!cleaned || cleaned.length < 10) {
-		throw new Error('Chunk skipped: content too short or invalid.');
-	}
-
-	const result = await embedder.embedContent({
-		content: {
-			parts: [{ text: cleaned }],
-			role: 'user',
-		},
-	});
-
-	const embedding = result?.embedding?.values;
-
-	if (!Array.isArray(embedding)) {
-		console.error('Invalid embedding structure:', result);
-		throw new Error('Gemini did not return a valid embedding array');
-	}
-
-	return embedding;
+// A namespace only exists once something has been stored in it, so a new
+// user's namespace may be "not found". For reads and deletes that simply
+// means there is nothing there.
+function isNotFound(err) {
+	return err?.name === 'PineconeNotFoundError';
 }
 
 async function addPaperChunks(paperId, userId, title, text) {
-	const index = pc.index(indexName);
-	const ns = index.namespace(namespaceName);
-
 	const chunks = splitIntoChunks(text);
+	const records = chunks.map((chunk, i) => ({
+		// Deterministic ids: indexing the same paper again overwrites its
+		// chunks instead of adding duplicates.
+		id: `${paperId}#${i}`,
+		[TEXT_FIELD]: chunk,
+		paperId: String(paperId),
+		title: title ? String(title) : '',
+		chunkIndex: i,
+	}));
 
-	const vectors = await Promise.all(
-		chunks.map(async (chunk, i) => {
-			const embedding = await embedText(chunk);
-			return {
-				id: uuidv4(),
-				values: embedding,
-				metadata: {
-					paperId,
-					userId,
-					title,
-					chunkIndex: i,
-					text: chunk,
-				},
-			};
-		})
-	);
-
-	await ns.upsert(vectors);
-	console.log(`✅ ${vectors.length} chunks indexed for paper "${title}"`);
+	// Batches are sent one after another. (Retries and clean-up of a
+	// half-indexed paper are not handled yet.)
+	const ns = userNamespace(userId);
+	for (let start = 0; start < records.length; start += UPSERT_BATCH_SIZE) {
+		await ns.upsertRecords(records.slice(start, start + UPSERT_BATCH_SIZE));
+	}
+	console.log(`${records.length} chunks indexed for paper "${title}"`);
+	return records.length;
 }
 
-// ✅ Search relevant chunks given a question
-async function searchRelevantChunks(
-	query,
-	topK = 4,
-	paperId = null,
-	userId = null
-) {
-	const index = pc.index(indexName);
-	const ns = index.namespace(namespaceName);
+// The topK chunks most similar to `query`, from this user's papers only
+// (optionally just one paper).
+async function searchRelevantChunks(query, topK = 4, paperId = null, userId) {
+	const ns = userNamespace(userId);
+	const search = { topK, inputs: { text: query } };
+	if (paperId) search.filter = { paperId: { $eq: String(paperId) } };
 
-	const queryEmbedding = await embedText(query);
-
-	const pineconeQuery = {
-		topK,
-		vector: queryEmbedding,
-		includeMetadata: true,
-		includeValues: false,
-	};
-
-	if (paperId && userId) {
-		pineconeQuery.filter = { paperId, userId };
-	} else if (userId) {
-		pineconeQuery.filter = { userId };
-	} else if (paperId) {
-		pineconeQuery.filter = { paperId };
+	let response;
+	try {
+		response = await ns.searchRecords({ query: search, fields: RETURN_FIELDS });
+	} catch (err) {
+		if (isNotFound(err)) return [];
+		throw err;
 	}
 
-	const result = await ns.query(pineconeQuery);
-
-	return result.matches.map((match) => ({
-		text: match.metadata.text,
-		meta: match.metadata,
-		score: match.score,
+	return response.result.hits.map((hit) => ({
+		text: hit.fields[TEXT_FIELD],
+		meta: hit.fields,
+		score: hit._score,
 	}));
 }
 
-// Note: the Pinecone JS SDK takes the metadata filter itself as the argument
-// to deleteMany. Wrapping it as { filter: ... } (the Python/REST shape) would
-// filter on a metadata field literally called "filter" and delete nothing.
-
 async function deleteVectorsByUser(userId) {
-	const ns = pc.index(indexName).namespace(namespaceName);
-	await ns.deleteMany({ userId: { $eq: String(userId) } });
+	try {
+		await userNamespace(userId).deleteAll();
+	} catch (err) {
+		if (!isNotFound(err)) throw err;
+	}
 	console.log(`All vectors deleted for user ${userId}`);
 }
 
+// Note: the Pinecone JS SDK takes the metadata filter itself as the argument
+// to deleteMany (not wrapped as { filter: ... }, the Python/REST shape).
 async function deleteVectorsByPaper(paperId, userId) {
-	const ns = pc.index(indexName).namespace(namespaceName);
-	await ns.deleteMany({
-		paperId: { $eq: String(paperId) },
-		userId: { $eq: String(userId) },
-	});
+	try {
+		await userNamespace(userId).deleteMany({ paperId: { $eq: String(paperId) } });
+	} catch (err) {
+		if (!isNotFound(err)) throw err;
+	}
 	console.log(`Vectors deleted for paper ${paperId}`);
 }
 
@@ -129,4 +109,6 @@ module.exports = {
 	searchRelevantChunks,
 	deleteVectorsByUser,
 	deleteVectorsByPaper,
+	namespaceName,
+	TEXT_FIELD,
 };
