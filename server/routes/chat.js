@@ -1,7 +1,7 @@
 const express = require('express');
 const fs = require('fs').promises;
 const multer = require('multer');
-const pdfParse = require('pdf-parse');
+const { parsePdf } = require('../utils/pdf');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const authLogin = require('../middleware/authToken');
 const ChatHistory = require('../models/chatlog.js');
@@ -108,7 +108,7 @@ router.post('/', authLogin, upload.single('file'), async (req, res) => {
 		if (req.file) {
 			if (req.file.mimetype === 'application/pdf') {
 				const buffer = await fs.readFile(req.file.path);
-				const parsed = await pdfParse(buffer);
+				const parsed = await parsePdf(buffer);
 				fileContent = parsed.text;
 			} else {
 				fileContent = await fs.readFile(req.file.path, 'utf-8');
@@ -121,7 +121,7 @@ router.post('/', authLogin, upload.single('file'), async (req, res) => {
 				// Only files this user uploaded; other users may use the same name.
 				const file = await findUserFileByName(paperId, req.user.id);
 				if (file) {
-					const parsed = await pdfParse(await readFile(file));
+					const parsed = await parsePdf(await readFile(file));
 					fileContent = parsed.text;
 					console.log('Successfully loaded paper from GridFS');
 				}

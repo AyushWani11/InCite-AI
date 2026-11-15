@@ -9,9 +9,11 @@ function escapeText(s) {
  * @param {object} opts
  * @param {string[][]} opts.pages  Lines of text for each page.
  * @param {string} [opts.title]    Embedded /Title metadata (optional).
+ * @param {boolean} [opts.pad]     Pad to ~40 KB, like a real paper (default).
+ *                                 Pass false for a tiny (< 1 KB) PDF.
  * @returns {Buffer}
  */
-function makePdf({ pages, title } = {}) {
+function makePdf({ pages, title, pad = true } = {}) {
 	if (!pages || pages.length === 0) pages = [['Empty test document.']];
 
 	// Object numbers: 1 catalog, 2 page tree, 3 font, then a (page, content)
@@ -43,12 +45,10 @@ function makePdf({ pages, title } = {}) {
 		infoNum = bodies.length;
 	}
 
-	// Pad with PDF comment lines to ~40 KB, a realistic minimum for a paper.
-	// pdf-parse bundles pdf.js 1.10, which assumes its data starts at offset 0
-	// of the underlying memory. Node copies buffers smaller than half of
-	// Buffer.poolSize (32 KB on Node 26, 4 KB before) into a shared pool at a
-	// varying offset, so smaller PDFs fail to parse at random.
-	let out = '%PDF-1.4\n' + `%${'-'.repeat(76)}\n`.repeat(520);
+	// By default, pad with PDF comment lines to ~40 KB, a realistic size for a
+	// paper. Tiny PDFs (pad: false) exercise the small-buffer case covered in
+	// small-pdf.test.js.
+	let out = '%PDF-1.4\n' + (pad ? `%${'-'.repeat(76)}\n`.repeat(520) : '');
 	const offsets = [];
 	bodies.forEach((body, i) => {
 		offsets.push(Buffer.byteLength(out, 'latin1'));

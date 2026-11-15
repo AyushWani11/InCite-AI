@@ -1,6 +1,6 @@
 const express = require('express');
 const multer = require('multer');
-const pdfParse = require('pdf-parse');
+const { parsePdf } = require('../utils/pdf');
 const mongoose = require('mongoose');
 const { Readable } = require('stream');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
@@ -53,7 +53,7 @@ router.post(
 
 		for (const file of files) {
 			try {
-				const parsed = await pdfParse(file.buffer);
+				const parsed = await parsePdf(file.buffer);
 				const text = parsed.text;
 
 				const metadata = parsed.info || {};
@@ -223,7 +223,7 @@ router.post('/summarize/:paperId', authLogin, async (req, res) => {
 			return res.status(404).json({ error: 'Paper file not found' });
 		}
 
-		const fullText = (await pdfParse(pdfBuffer)).text;
+		const fullText = (await parsePdf(pdfBuffer)).text;
 		const prompt = buildSummaryPrompt(fullText);
 
 		const result = await model.generateContent(prompt);
@@ -314,7 +314,7 @@ router.post('/assess/:paperId', authLogin, async (req, res) => {
 			return res.status(404).json({ error: 'Paper file not found' });
 		}
 
-		const text = (await pdfParse(pdfBuffer)).text;
+		const text = (await parsePdf(pdfBuffer)).text;
 
 		const prompt = `
 You are an academic reasearch paper reviewer who focuses more on content. assume none of the figures are missing.
