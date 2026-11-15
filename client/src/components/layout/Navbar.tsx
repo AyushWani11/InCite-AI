@@ -1,140 +1,99 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { FileText, Menu, X } from 'lucide-react';
-import { Button } from '../common';
-
+import { Menu, X } from 'lucide-react';
+import { Logo, buttonClasses } from '../common';
 import { API_BASE_URL as backendUrl } from '../../config';
 
+const sectionLinks = [
+	{ href: '#features', label: 'Features' },
+	{ href: '#how-it-works', label: 'How it works' },
+];
+
+const linkClass =
+	'text-sm font-medium text-gray-600 hover:text-gray-900 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500';
+
+// Navigation for the public pages: section links, and log in / sign up or,
+// when logged in, a way into the dashboard.
 const Navbar: React.FC = () => {
 	const [isMenuOpen, setIsMenuOpen] = useState(false);
 	const [user, setUser] = useState<{ username: string } | null>(null);
 
-	const toggleMenu = () => setIsMenuOpen(!isMenuOpen);
-
-	// Check login status on mount
 	useEffect(() => {
-		fetch(`${backendUrl}/auth/check-login`, {
-			method: 'GET',
-			credentials: 'include',
-		})
-			.then((res) => res.json())
-			.then((data) => {
-				if (data.user?.username) {
-					setUser(data.user);
-				}
-			})
+		fetch(`${backendUrl}/auth/check-login`, { credentials: 'include' })
+			.then((res) => (res.ok ? res.json() : null))
+			.then((data) => setUser(data?.user?.username ? data.user : null))
 			.catch(() => setUser(null));
 	}, []);
 
+	const closeMenu = () => setIsMenuOpen(false);
+
 	const handleLogout = async () => {
-		await fetch(`${backendUrl}/auth/logout`, {
-			method: 'POST',
-			credentials: 'include',
-		});
+		await fetch(`${backendUrl}/auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => {});
 		setUser(null);
-		window.location.reload();
+		closeMenu();
+	};
+
+	const authActions = (fullWidth: boolean) => {
+		const width = fullWidth ? 'w-full' : undefined;
+		return user ? (
+			<>
+				<span className='text-sm text-gray-600'>Hi, {user.username}</span>
+				<Link to='/dashboard' className={buttonClasses('primary', 'sm', width)} onClick={closeMenu}>
+					Open dashboard
+				</Link>
+				<button type='button' onClick={handleLogout} className={buttonClasses('ghost', 'sm', width)}>
+					Log out
+				</button>
+			</>
+		) : (
+			<>
+				<Link to='/login' className={buttonClasses('ghost', 'sm', width)} onClick={closeMenu}>
+					Log in
+				</Link>
+				<Link to='/signup' className={buttonClasses('primary', 'sm', width)} onClick={closeMenu}>
+					Sign up
+				</Link>
+			</>
+		);
 	};
 
 	return (
-		<nav className='fixed top-0 left-0 right-0 z-50 bg-white border-b border-gray-200'>
-			<div className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-8'>
-				<div className='flex justify-between items-center h-16'>
-					{/* Logo */}
-					<Link to='/' className='flex items-center space-x-2'>
-						<div className='w-8 h-8 bg-teal-500 rounded-lg flex items-center justify-center'>
-							<FileText className='w-5 h-5 text-white' />
-						</div>
-						<span className='text-xl font-bold text-gray-900'>InCite AI</span>
-					</Link>
+		<nav aria-label='Main' className='fixed inset-x-0 top-0 z-50 bg-white/95 backdrop-blur border-b border-gray-200'>
+			<div className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4'>
+				<Logo />
 
-					{/* Desktop Navigation */}
-					<div className='hidden md:flex space-x-8 ml-10'>
-						<a href='#features'>Features</a>
-						<a href='#how-it-works'>How it Works</a>
-						{/* <a href='#pricing'>Pricing</a>
-						<a href='#contact'>Contact</a> */}
-					</div>
-
-					{/* Desktop CTA */}
-					<div className='hidden md:flex items-center space-x-4'>
-						{user ? (
-							<>
-								<span className='text-gray-700'>Hello, {user.username}</span>
-								<Button
-									size='sm'
-									className='bg-teal-500 hover:bg-teal-600'
-									onClick={handleLogout}
-								>
-									Logout
-								</Button>
-							</>
-						) : (
-							<>
-								<Link to='/signup'>
-									<Button variant='ghost' size='sm'>
-										Sign Up
-									</Button>
-								</Link>
-								<Link to='/login'>
-									<Button size='sm' className='bg-teal-500 hover:bg-teal-600'>
-										Log In
-									</Button>
-								</Link>
-							</>
-						)}
-					</div>
-
-					{/* Mobile menu button */}
-					<div className='md:hidden'>
-						<button onClick={toggleMenu}>
-							{isMenuOpen ? (
-								<X className='h-6 w-6' />
-							) : (
-								<Menu className='h-6 w-6' />
-							)}
-						</button>
-					</div>
+				<div className='hidden md:flex items-center gap-8'>
+					{sectionLinks.map((l) => (
+						<a key={l.href} href={l.href} className={linkClass}>
+							{l.label}
+						</a>
+					))}
 				</div>
+
+				<div className='hidden md:flex items-center gap-3'>{authActions(false)}</div>
+
+				<button
+					type='button'
+					className='md:hidden -mr-2 p-2 rounded-lg text-gray-700 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500'
+					onClick={() => setIsMenuOpen((open) => !open)}
+					aria-expanded={isMenuOpen}
+					aria-controls='mobile-menu'
+					aria-label={isMenuOpen ? 'Close menu' : 'Open menu'}
+				>
+					{isMenuOpen ? <X className='h-6 w-6' /> : <Menu className='h-6 w-6' />}
+				</button>
 			</div>
 
-			{/* Mobile Menu */}
 			{isMenuOpen && (
-				<div className='md:hidden bg-white px-3 pt-2 pb-4 space-y-2 border-t'>
-					<a href='#features'>Features</a>
-					<a href='#how-it-works'>How it Works</a>
-					<a href='#pricing'>Pricing</a>
-					<a href='#contact'>Contact</a>
-					{user ? (
-						<>
-							<span className='block text-gray-700'>
-								Hello, {user.username}
-							</span>
-							<Button
-								variant='ghost'
-								size='sm'
-								className='w-full'
-								onClick={handleLogout}
-							>
-								Logout
-							</Button>
-						</>
-					) : (
-						<>
-							<Link to='/signup'>
-								<Button variant='ghost' size='sm' className='w-full'>
-									Sign In
-								</Button>
-							</Link>
-							<Link to='/login'>
-								<Button
-									size='sm'
-									className='w-full bg-teal-500 hover:bg-teal-600'
-								>
-									Get Started
-								</Button>
-							</Link>
-						</>
-					)}
+				<div id='mobile-menu' className='md:hidden border-t border-gray-200 bg-white px-4 pb-4'>
+					<div className='flex flex-col py-2'>
+						{sectionLinks.map((l) => (
+							<a key={l.href} href={l.href} onClick={closeMenu} className={`${linkClass} py-3`}>
+								{l.label}
+							</a>
+						))}
+					</div>
+					<div className='flex flex-col gap-2 pt-4 border-t border-gray-100'>{authActions(true)}</div>
 				</div>
 			)}
 		</nav>
