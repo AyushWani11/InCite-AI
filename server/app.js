@@ -25,18 +25,12 @@ app.use(cors(corsOptions));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-app.use(
-	'/api/chat/save-history',
-	express.text({ type: 'text/plain' }),
-	(req, res, next) => {
-		try {
-			req.body = JSON.parse(req.body); // Manually parse the text into JSON
-			next(); // Pass to the next middleware
-		} catch (error) {
-			res.status(400).json({ error: 'Invalid JSON format' });
-		}
-	}
-);
+// Saved chat history may also arrive as text/plain (JSON text): browsers send
+// that without a CORS preflight, which matters for a save made while the page
+// is closing. The route parses it after the login check. (This used to call
+// JSON.parse here on every request, including JSON bodies that were already
+// parsed above, so every save failed with 400.)
+app.use('/api/chat/save-history', express.text({ type: 'text/plain' }));
 
 app.use('/api/chat', chatRoutes);
 app.use('/api/auth', authRoutes);
