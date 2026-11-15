@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { Modal, buttonClasses } from '../common';
+import RichText from '../common/RichText';
 import { API_BASE_URL as backendUrl } from '../../config';
 import { NETWORK_ERROR, readError } from '../../utils/http';
 
@@ -135,7 +136,7 @@ const Value: React.FC<{ value: unknown; numbered?: boolean }> = ({ value, number
 			>
 				{value.map((item, i) => (
 					<li key={i} className='pl-1'>
-						{unquote(String(item))}
+						<RichText inline text={unquote(String(item))} />
 					</li>
 				))}
 			</List>
@@ -148,7 +149,8 @@ const Value: React.FC<{ value: unknown; numbered?: boolean }> = ({ value, number
 			</pre>
 		);
 	}
-	return <p className='whitespace-pre-wrap leading-relaxed text-gray-700'>{unquote(String(value ?? ''))}</p>;
+	// Model-written text: markdown and LaTeX math (e.g. $\mu_E$) are rendered.
+	return <RichText text={unquote(String(value ?? ''))} className='leading-relaxed text-gray-700' />;
 };
 
 const Card: React.FC<{ title: string; icon: LucideIcon; children: React.ReactNode }> = ({
@@ -233,7 +235,7 @@ const AssessmentView: React.FC<{ assessment: Assessment }> = ({ assessment }) =>
 					{feedback.map(([label, text]) => (
 						<div key={label}>
 							<h4 className='text-sm font-semibold text-gray-800'>{label}</h4>
-							<p className='mt-1 leading-relaxed text-gray-700'>{text || '—'}</p>
+							<RichText text={text || '—'} className='mt-1 leading-relaxed text-gray-700' />
 						</div>
 					))}
 				</div>

@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import {
 	MessageCircle,
 	Send,
@@ -12,8 +12,7 @@ import {
 	FileText,
 	AlertCircle,
 } from 'lucide-react';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
+import RichText from '../common/RichText';
 import { clsx } from 'clsx';
 import SpeechRecognition, { useSpeechRecognition } from 'react-speech-recognition';
 import CodeBlock from '../common/CodeBlock';
@@ -128,17 +127,6 @@ const splitCodeBlocks = (text: string) => {
 	return parts;
 };
 
-// The model's markdown, rendered as HTML. Sanitized, because the text comes
-// from an AI model that has read user-supplied documents.
-const Markdown: React.FC<{ text: string }> = ({ text }) => {
-	const html = useMemo(() => DOMPurify.sanitize(marked.parse(text, { async: false }) as string), [text]);
-	return (
-		<div
-			className='prose prose-sm prose-gray max-w-none prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-headings:mt-4 prose-headings:mb-2 prose-a:text-teal-700'
-			dangerouslySetInnerHTML={{ __html: html }}
-		/>
-	);
-};
 
 const formatSource = (source: Source) =>
 	source.scope === 'excerpts' && source.excerpts?.length
@@ -219,7 +207,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedPaper }) => {
 
 	const speak = (text: string) => {
 		const synth = window.speechSynthesis;
-		const utterance = new SpeechSynthesisUtterance(text.replace(/[*_#`>]+/g, ''));
+		// Drop markdown and LaTeX symbols so they aren't read out ("dollar").
+		const utterance = new SpeechSynthesisUtterance(text.replace(/[*_#`>$\\{}]+/g, ''));
 		utterance.voice = synth.getVoices().find((v) => v.lang === 'en-US') || null;
 		synth.speak(utterance);
 	};
@@ -426,7 +415,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ selectedPaper }) => {
 												part.type === 'code' ? (
 													<CodeBlock key={i} code={part.content} language={part.language || 'text'} />
 												) : (
-													<Markdown key={i} text={part.content} />
+													<RichText key={i} text={part.content} className='prose-sm' />
 												)
 											)
 										)}
