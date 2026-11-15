@@ -6,6 +6,9 @@ const PaperSchema = new mongoose.Schema({
 	publicationDate: Date,
 	keywords: [String],
 	filename: String,
+	// Id of the stored PDF in GridFS. Filenames are not unique across users,
+	// so this is how a paper finds its own file. Older papers lack it.
+	fileId: mongoose.Schema.Types.ObjectId,
 	uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 	createdAt: { type: Date, default: Date.now },
 	summary: String,

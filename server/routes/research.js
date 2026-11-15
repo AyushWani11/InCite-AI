@@ -6,7 +6,11 @@ const { Readable } = require('stream');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const authLogin = require('../middleware/authToken');
 const Paper = require('../models/paper');
-const { findOwnedPaper } = require('../utils/papers');
+const {
+	findOwnedPaper,
+	readPaperFile,
+	deletePaperFile,
+} = require('../utils/papers');
 const { addPaperChunks } = require('../utils/vectorStore');
 const { deleteVectorsByUser } = require('../utils/vectorStore');
 const { deleteVectorsByPaper } = require('../utils/vectorStore');
@@ -113,6 +117,7 @@ ${text.substring(0, 6000)}
 									: null,
 								keywords,
 								filename: uploadStream.filename,
+								fileId: uploadStream.id,
 								uploadedBy: userId,
 							});
 							await paper.save();
@@ -201,20 +206,12 @@ router.post('/summarize/:paperId', authLogin, async (req, res) => {
 		const paper = await findOwnedPaper(req.params.paperId, req.user.id);
 		if (!paper) return res.status(404).json({ error: 'Paper not found' });
 
-		const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
-			bucketName: 'papers',
-		});
-		const chunks = [];
+		const pdfBuffer = await readPaperFile(paper);
+		if (!pdfBuffer) {
+			return res.status(404).json({ error: 'Paper file not found' });
+		}
 
-		await new Promise((resolve, reject) => {
-			bucket
-				.openDownloadStreamByName(paper.filename)
-				.on('data', (chunk) => chunks.push(chunk))
-				.on('end', resolve)
-				.on('error', reject);
-		});
-
-		const fullText = (await pdfParse(Buffer.concat(chunks))).text;
+		const fullText = (await pdfParse(pdfBuffer)).text;
 		const prompt = buildSummaryPrompt(fullText);
 
 		const result = await model.generateContent(prompt);
@@ -255,23 +252,12 @@ router.delete('/delete-all', authLogin, async (req, res) => {
 	try {
 		const userId = req.user.id;
 
-		// Optionally only delete user-uploaded papers:
 		const papers = await Paper.find({ uploadedBy: userId });
 
-		const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
-			bucketName: 'papers',
-		});
-
-		// Delete all files in GridFS by matching filenames
+		// Delete each paper's own stored file (never by filename alone, which
+		// other users may share).
 		for (const paper of papers) {
-			const files = await mongoose.connection.db
-				.collection('papers.files')
-				.find({ filename: paper.filename })
-				.toArray();
-
-			for (const file of files) {
-				await bucket.delete(file._id);
-			}
+			await deletePaperFile(paper);
 		}
 
 		await Paper.deleteMany({ uploadedBy: userId });
@@ -290,15 +276,7 @@ router.delete('/delete/:id', authLogin, async (req, res) => {
 		const paper = await findOwnedPaper(req.params.id, req.user.id);
 		if (!paper) return res.status(404).json({ error: 'Paper not found' });
 
-		const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
-			bucketName: 'papers',
-		});
-		const files = await mongoose.connection.db
-			.collection('papers.files')
-			.find({ filename: paper.filename })
-			.toArray();
-
-		for (const file of files) await bucket.delete(file._id);
+		await deletePaperFile(paper);
 		await paper.deleteOne();
 
 		// await deleteVectorsByPaper(
@@ -325,20 +303,12 @@ router.post('/assess/:paperId', authLogin, async (req, res) => {
 		const paper = await findOwnedPaper(req.params.paperId, req.user.id);
 		if (!paper) return res.status(404).json({ error: 'Paper not found' });
 
-		const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
-			bucketName: 'papers',
-		});
+		const pdfBuffer = await readPaperFile(paper);
+		if (!pdfBuffer) {
+			return res.status(404).json({ error: 'Paper file not found' });
+		}
 
-		const chunks = [];
-		await new Promise((resolve, reject) => {
-			bucket
-				.openDownloadStreamByName(paper.filename)
-				.on('data', (chunk) => chunks.push(chunk))
-				.on('end', resolve)
-				.on('error', reject);
-		});
-
-		const text = (await pdfParse(Buffer.concat(chunks))).text;
+		const text = (await pdfParse(pdfBuffer)).text;
 
 		const prompt = `
 You are an academic reasearch paper reviewer who focuses more on content. assume none of the figures are missing.

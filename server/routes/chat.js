@@ -4,9 +4,9 @@ const multer = require('multer');
 const pdfParse = require('pdf-parse');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const authLogin = require('../middleware/authToken');
-const mongoose = require('mongoose');
 const ChatHistory = require('../models/chatlog.js');
 const { searchRelevantChunks } = require('../utils/vectorStore');
+const { findUserFileByName, readFile } = require('../utils/papers');
 require('dotenv').config();
 
 const router = express.Router();
@@ -118,22 +118,13 @@ router.post('/', authLogin, upload.single('file'), async (req, res) => {
 
 		if (paperId && !req.file) {
 			try {
-				const bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
-					bucketName: 'papers',
-				});
-
-				const chunks = [];
-				const stream = bucket.openDownloadStreamByName(paperId);
-
-				for await (const chunk of stream) {
-					chunks.push(chunk);
+				// Only files this user uploaded; other users may use the same name.
+				const file = await findUserFileByName(paperId, req.user.id);
+				if (file) {
+					const parsed = await pdfParse(await readFile(file));
+					fileContent = parsed.text;
+					console.log('Successfully loaded paper from GridFS');
 				}
-
-				const buffer = Buffer.concat(chunks);
-				const parsed = await pdfParse(buffer);
-				fileContent = parsed.text;
-
-				console.log('Successfully loaded paper from GridFS');
 			} catch (gridError) {
 				console.warn(
 					'Could not fetch paper from GridFS, using vector search:',
