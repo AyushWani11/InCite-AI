@@ -2,9 +2,9 @@
 //
 // Tests must run without API keys or network access. Instead of changing the
 // app code to accept mocks, we pre-fill Node's module cache: when app code
-// later calls require('@google/generative-ai') or
-// require('@pinecone-database/pinecone'), Node hands back these fakes.
-// This file must therefore be required BEFORE the app is loaded.
+// later calls require('@google/genai') or require('@pinecone-database/pinecone'),
+// Node hands back these fakes. This file must therefore be required BEFORE the
+// app is loaded.
 const Module = require('module');
 
 const DIM = 64;
@@ -13,13 +13,13 @@ const state = {
 	gemini: {
 		// Every generateContent call: { model, prompt, request }
 		calls: [],
-		// Every chat turn: { model, history, message }
+		// Every streamed reply (chat answers): { model, history, config }
 		chats: [],
-		embedCalls: 0,
 		// Per-test hooks (reset() restores the defaults below)
 		generate: null, // ({ model, prompt, request }) => string
-		chatReply: null, // ({ history, message }) => string
-		embedFails: null, // (text) => boolean, simulate an embedding error
+		// ({ model, history }) => string, or an array of pieces to stream;
+		// an Error in the array is thrown at that point, mid-stream.
+		chatReply: null,
 	},
 	pinecone: {
 		namespaces: new Map(), // namespace -> Map(id -> record)
@@ -46,10 +46,8 @@ const DEFAULT_INDEX_CONFIG = {
 function reset() {
 	state.gemini.calls = [];
 	state.gemini.chats = [];
-	state.gemini.embedCalls = 0;
 	state.gemini.generate = () => '{}';
 	state.gemini.chatReply = () => 'fake answer';
-	state.gemini.embedFails = () => false;
 	state.pinecone.namespaces = new Map();
 	state.pinecone.queries = [];
 	state.pinecone.deletes = [];
@@ -81,60 +79,42 @@ function fakeEmbed(text) {
 	return v.map((x) => x / norm);
 }
 
-function textOf(request) {
-	if (typeof request === 'string') return request;
-	const contents = request?.contents || (request?.content ? [request.content] : []);
-	return contents
-		.flatMap((c) => c.parts || [])
-		.map((p) => p.text || '')
+// The text of a `contents` value: a string, a turn, or a list of either.
+function textOf(contents) {
+	if (typeof contents === 'string') return contents;
+	const list = Array.isArray(contents) ? contents : [contents];
+	return list
+		.flatMap((c) => (typeof c === 'string' ? [c] : (c?.parts || []).map((p) => p.text || '')))
 		.join('\n');
 }
 
-// ---------- Fake Gemini SDK ----------
-class FakeGoogleGenerativeAI {
-	constructor(apiKey) {
-		this.apiKey = apiKey;
-	}
-
-	getGenerativeModel({ model }) {
-		return {
-			model,
-			async embedContent(request) {
-				state.gemini.embedCalls++;
-				const text = textOf(request);
-				if (state.gemini.embedFails(text)) {
-					throw new Error('[fake] embedding failed');
-				}
-				return { embedding: { values: fakeEmbed(text) } };
-			},
-			async generateContent(request) {
-				const call = { model, prompt: textOf(request), request };
+// ---------- Fake Gemini SDK (@google/genai) ----------
+// Same surface the app uses: ai.models.generateContent / generateContentStream,
+// whose responses expose the reply as `.text`.
+class FakeGoogleGenAI {
+	constructor(options) {
+		this.options = options;
+		this.models = {
+			async generateContent({ model, contents, config }) {
+				if (!model) throw new Error('[fake gemini] model is required');
+				const call = { model, prompt: textOf(contents), request: { contents, config } };
 				state.gemini.calls.push(call);
-				const out = state.gemini.generate(call);
-				return { response: { text: () => out } };
+				return { text: state.gemini.generate(call) };
 			},
-			startChat({ history = [] } = {}) {
-				const turn = async (message) => {
-					const record = { model, history, message };
-					state.gemini.chats.push(record);
-					return state.gemini.chatReply(record);
-				};
-				return {
-					async sendMessage(message) {
-						const out = await turn(message);
-						return { response: { text: () => out } };
-					},
-					async sendMessageStream(message) {
-						const out = await turn(message);
-						async function* stream() {
-							yield { text: () => out };
-						}
-						return {
-							stream: stream(),
-							response: Promise.resolve({ text: () => out }),
-						};
-					},
-				};
+			// Like the real SDK: the promise settles once the request is
+			// accepted (a rejected request throws here), then pieces stream.
+			async generateContentStream({ model, contents, config }) {
+				if (!model) throw new Error('[fake gemini] model is required');
+				const record = { model, history: contents, config };
+				state.gemini.chats.push(record);
+				const reply = await state.gemini.chatReply(record);
+				const pieces = Array.isArray(reply) ? reply : [reply];
+				return (async function* () {
+					for (const piece of pieces) {
+						if (piece instanceof Error) throw piece;
+						yield { text: piece };
+					}
+				})();
 			},
 		};
 	}
@@ -334,7 +314,7 @@ function install(name, overrides) {
 	require.cache[file] = fake;
 }
 
-install('@google/generative-ai', { GoogleGenerativeAI: FakeGoogleGenerativeAI });
+install('@google/genai', { GoogleGenAI: FakeGoogleGenAI });
 install('@pinecone-database/pinecone', { Pinecone: FakePinecone });
 
 module.exports = { state, reset, fakeEmbed, DIM };

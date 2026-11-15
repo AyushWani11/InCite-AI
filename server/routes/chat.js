@@ -2,7 +2,7 @@ const express = require('express');
 const fs = require('fs').promises;
 const multer = require('multer');
 const { parsePdf } = require('../utils/pdf');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { generateText, streamText } = require('../utils/llm');
 const authLogin = require('../middleware/authToken');
 const ChatHistory = require('../models/chatlog.js');
 const { searchRelevantChunks } = require('../utils/vectorStore');
@@ -13,14 +13,11 @@ const router = express.Router();
 // defParamCharset: browsers send filenames as UTF-8; multer 2 assumes latin1.
 const upload = multer({ dest: 'uploads/', defParamCharset: 'utf8' });
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 const generationConfig = {
 	temperature: 0.3,
 	topP: 0.95,
 	topK: 64,
 	maxOutputTokens: 8192,
-	responseMimeType: 'text/plain',
 };
 
 router.post('/', authLogin, upload.single('file'), async (req, res) => {
@@ -171,8 +168,7 @@ ${titleList}
 Return ONLY the index of the most relevant paper.
 `;
 
-				const result = await model.generateContent(disambiguationPrompt);
-				const answerText = result.response.text().trim();
+				const answerText = (await generateText(disambiguationPrompt)).trim();
 
 				const selectedIndex =
 					parseInt(answerText.match(/\d+/)?.[0] || '-1', 10) - 1;
@@ -215,8 +211,11 @@ Return ONLY the index of the most relevant paper.
 			});
 		}
 
-		// Use validated history instead of raw chatHistory
-		const promptHistory = [
+		// Earlier turns, then one new user turn that carries the context and
+		// the question. Gemini expects user and model turns to alternate, so
+		// drop a trailing user turn (e.g. a question whose answer failed).
+		while (validatedHistory.at(-1)?.role === 'user') validatedHistory.pop();
+		const contents = [
 			...validatedHistory,
 			{
 				role: 'user',
@@ -236,22 +235,21 @@ ${context}`,
 			},
 		];
 
-		const chatSession = model.startChat({
-			generationConfig,
-			history: promptHistory,
-		});
-
-		const result = await chatSession.sendMessageStream(userQuestion);
+		// Throws here (before anything is sent) if Gemini rejects the request.
+		const reply = await streamText(contents, generationConfig);
 
 		res.setHeader('Content-Type', 'text/plain');
 		res.setHeader('Transfer-Encoding', 'chunked');
 
-		for await (const chunk of result.stream) {
-			res.write(chunk.text());
+		for await (const piece of reply) {
+			res.write(piece);
 		}
 		res.end();
 	} catch (error) {
 		console.error('Chat error:', error);
+		// If part of the answer was already streamed, the status can no longer
+		// change; just end the response. (Setting it would throw again.)
+		if (res.headersSent) return res.end();
 		res.status(500).json({ error: 'AI generation failed.' });
 	}
 });

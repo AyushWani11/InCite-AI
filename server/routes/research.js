@@ -3,7 +3,7 @@ const multer = require('multer');
 const { parsePdf } = require('../utils/pdf');
 const mongoose = require('mongoose');
 const { Readable } = require('stream');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { generateText } = require('../utils/llm');
 const authLogin = require('../middleware/authToken');
 const Paper = require('../models/paper');
 const {
@@ -29,8 +29,6 @@ const upload = multer({
 	defParamCharset: 'utf8',
 });
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
 // Helper
 function isValidDate(date) {
@@ -81,8 +79,7 @@ Text:
 ${text.substring(0, 6000)}
 				`;
 
-					const result = await model.generateContent(prompt);
-					let jsonText = result.response.text().trim();
+					let jsonText = (await generateText(prompt)).trim();
 					if (jsonText.startsWith('```'))
 						jsonText = jsonText.replace(/```json|```/g, '').trim();
 					mlData = JSON.parse(jsonText);
@@ -231,8 +228,7 @@ router.post('/summarize/:paperId', authLogin, async (req, res) => {
 		const fullText = (await parsePdf(pdfBuffer)).text;
 		const prompt = buildSummaryPrompt(fullText);
 
-		const result = await model.generateContent(prompt);
-		let jsonText = result.response.text().trim();
+		let jsonText = (await generateText(prompt)).trim();
 
 		// remove markdown code fences
 		if (jsonText.startsWith('```')) {
@@ -354,8 +350,7 @@ Text:
 ${text.substring(0, 10000)}
 `;
 
-		const result = await model.generateContent(prompt);
-		let responseText = result.response.text().trim();
+		let responseText = (await generateText(prompt)).trim();
 
 		if (responseText.startsWith('```')) {
 			responseText = responseText.replace(/```json|```/g, '').trim();
