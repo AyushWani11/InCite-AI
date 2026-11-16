@@ -5,6 +5,15 @@ ask questions about them, and get structured summaries and reviewer-style
 quality assessments. Answers are grounded in your own papers and say which
 paper and passages they used.
 
+**Live demo:** https://in-cite-ai.vercel.app (create an account to try it;
+uploaded papers are sent to Google's Gemini free tier, see
+[Known limitations](#known-limitations)).
+
+![The dashboard: the paper list, an open paper, and a chat answer about it that lists its source](docs/images/dashboard.png)
+
+*Screenshot from a local demo with a made-up sample paper. The answer is a
+canned reply standing in for Gemini.*
+
 ## What it does
 
 ### Papers
