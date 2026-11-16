@@ -5,6 +5,15 @@ ask questions about them, and get structured summaries and reviewer-style
 quality assessments. Answers are grounded in your own papers and say which
 paper and passages they used.
 
+**Live demo:** https://in-cite-ai.vercel.app (create an account to try it;
+uploaded papers are sent to Google's Gemini free tier, see
+[Known limitations](#known-limitations)).
+
+![The dashboard: the paper list, an open paper, and a chat answer about it that lists its source](docs/images/dashboard.png)
+
+*Screenshot from a local demo with a made-up sample paper. The answer is a
+canned reply standing in for Gemini.*
+
 ## What it does
 
 ### Papers
@@ -196,7 +205,9 @@ checks on every paper route, download, search and chat; files with the same
 name from different users; vector clean-up on delete; reliable JSON (good,
 wrapped, incomplete and garbage replies); paper selection by retrieval;
 whole-paper summaries and map-reduce; upload retries, clean-up and per-file
-status; chunking and overlap; sources; and the re-index script. Tests were
+status; chunking and overlap; sources; saving conversations (JSON and
+`text/plain` bodies, updating by `sessionId`, other users' conversations left
+alone, bad input rejected); and the re-index script. Tests were
 written to fail before each fix and pass after it.
 
 ## API
