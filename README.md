@@ -196,7 +196,9 @@ checks on every paper route, download, search and chat; files with the same
 name from different users; vector clean-up on delete; reliable JSON (good,
 wrapped, incomplete and garbage replies); paper selection by retrieval;
 whole-paper summaries and map-reduce; upload retries, clean-up and per-file
-status; chunking and overlap; sources; and the re-index script. Tests were
+status; chunking and overlap; sources; saving conversations (JSON and
+`text/plain` bodies, updating by `sessionId`, other users' conversations left
+alone, bad input rejected); and the re-index script. Tests were
 written to fail before each fix and pass after it.
 
 ## API
