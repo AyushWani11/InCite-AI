@@ -497,7 +497,6 @@ chat, summary, assessment, delete and logout.
   dashboard inside the app and on `pagehide` (phones often skip
   `beforeunload`).
 - Add upload size limits and rate limiting.
-- Remove unused dependencies and work through the `npm audit` findings.
 - Turn the Puppeteer checks into real browser tests in the repo (sources,
   upload messages, the phone layout), since the server tests don't cover the
   UI.

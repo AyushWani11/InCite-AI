@@ -1,5 +1,7 @@
 const mongoose = require('mongoose');
-const bcrypt = require('bcrypt'); // or bcryptjs, whichever you prefer
+// bcryptjs (pure JavaScript), the same library the login route uses to check
+// passwords; it reads hashes made by the native "bcrypt" used before.
+const bcrypt = require('bcryptjs');
 const Schema = mongoose.Schema;
 
 const userSchema = new Schema(

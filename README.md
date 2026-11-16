@@ -119,7 +119,7 @@ When no paper is selected:
 | Storage | MongoDB (Mongoose) + GridFS for the PDFs |
 | PDF parsing | `pdf-parse` |
 | Uploads | `multer` 2 |
-| Auth | JWT in an httpOnly cookie, bcrypt password hashes |
+| Auth | JWT in an httpOnly cookie, bcrypt password hashes (`bcryptjs`) |
 | Tests | Node's built-in `node:test`, `mongodb-memory-server`, in-memory fakes for Gemini and Pinecone |
 
 ## Running it locally
@@ -267,9 +267,10 @@ Being honest about what this does not do (yet):
   checked by hand and with a local Puppeteer script that is not in the repo.
 - **Embedding model is tied to the Pinecone index:** changing it means a new
   index and a re-index (see Deployment notes).
-- **Dependencies:** several unused packages remain in `server/package.json`
-  (e.g. `chromadb`, `openai`), and `npm audit` reports advisories, some in
-  direct dependencies such as `mongoose` and `express`.
+- **Dependency advisories:** `npm audit` reports none for the server or for
+  the packages the client ships to the browser. Ten remain in the client's
+  development tools (ESLint's dependencies and the Tailwind typography
+  plugin), where the only offered fixes are breaking upgrades or downgrades.
 - **Legacy data:** papers indexed before the chunk-overlap change keep their old
   chunks until `npm run reindex` is run; a namespace from before the per-user
   layout may still exist in the index and can be deleted once no longer needed.
